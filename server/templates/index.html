@@ -57,6 +57,10 @@
                         <span class="nav-icon">📦</span>
                         <span>我的应用</span>
                     </a>
+                    <a href="#" class="nav-item" data-page="codes">
+                        <span class="nav-icon">🔑</span>
+                        <span>我的口令</span>
+                    </a>
                     <a href="#" class="nav-item admin-only" data-page="admin" id="nav-admin">
                         <span class="nav-icon">⚙️</span>
                         <span>管理后台</span>
@@ -88,10 +92,27 @@
                     </div>
                 </div>
 
+                <div id="page-codes" class="content-page hidden">
+                    <div class="page-header">
+                        <h2>我的口令</h2>
+                        <div class="header-actions">
+                            <button class="btn-primary" id="btn-create-multi-code">创建多应用口令</button>
+                            <button class="btn-secondary" id="btn-merge-codes">合并口令</button>
+                        </div>
+                    </div>
+                    <div class="code-list" id="code-list">
+                    </div>
+                    <div class="empty-state" id="codes-empty-state">
+                        <div class="empty-icon">🔑</div>
+                        <p>还没有口令，上传应用后会自动生成</p>
+                    </div>
+                </div>
+
                 <div id="page-admin" class="content-page hidden">
                     <div class="admin-tabs">
                         <button class="admin-tab active" data-admin-tab="users">用户管理</button>
                         <button class="admin-tab" data-admin-tab="invites">邀请码管理</button>
+                        <button class="admin-tab" data-admin-tab="categories">分类管理</button>
                         <button class="admin-tab" data-admin-tab="stats">数据统计</button>
                     </div>
 
@@ -141,6 +162,15 @@
                         </div>
                     </div>
 
+                    <div id="admin-categories" class="admin-panel hidden">
+                        <div class="panel-header">
+                            <h3>分类管理</h3>
+                            <button class="btn-primary btn-small" id="btn-add-category">添加分类</button>
+                        </div>
+                        <div class="category-grid" id="category-grid">
+                        </div>
+                    </div>
+
                     <div id="admin-stats" class="admin-panel hidden">
                         <div class="stats-grid">
                             <div class="stat-card">
@@ -173,7 +203,13 @@
                     <div class="modal-body">
                         <div class="form-group">
                             <label>应用名称（可选）</label>
-                            <input type="text" id="upload-app-name" placeholder="留空则使用文件名">
+                            <input type="text" id="upload-app-name" placeholder="留空则自动读取APK信息">
+                        </div>
+                        <div class="form-group">
+                            <label>应用分类</label>
+                            <select id="upload-category">
+                                <option value="0">请选择分类</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label>APK文件</label>
@@ -184,10 +220,90 @@
                             </div>
                             <p class="file-name" id="file-name"></p>
                         </div>
+                        <div class="apk-info-preview hidden" id="apk-preview">
+                            <h4>APK信息预览</h4>
+                            <div class="apk-info-row">
+                                <span class="info-label">应用名：</span>
+                                <span class="info-value" id="preview-app-name">-</span>
+                            </div>
+                            <div class="apk-info-row">
+                                <span class="info-label">包名：</span>
+                                <span class="info-value" id="preview-package">-</span>
+                            </div>
+                            <div class="apk-info-row">
+                                <span class="info-label">版本：</span>
+                                <span class="info-value" id="preview-version">-</span>
+                            </div>
+                            <div class="apk-info-row">
+                                <span class="info-label">图标：</span>
+                                <img id="preview-icon" class="preview-icon" src="" alt="图标预览">
+                            </div>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button class="btn-secondary" onclick="closeModal('upload-modal')">取消</button>
                         <button class="btn-primary" id="btn-upload-confirm">上传</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-mask hidden" id="multi-code-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>创建多应用口令</h3>
+                        <button class="modal-close" onclick="closeModal('multi-code-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="modal-desc">选择要加入口令的应用（最多10个）</p>
+                        <div class="app-select-list" id="multi-code-app-list">
+                        </div>
+                        <p class="select-count">已选择 <span id="multi-code-count">0</span> / 10 个应用</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('multi-code-modal')">取消</button>
+                        <button class="btn-primary" id="btn-create-multi-confirm">创建口令</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-mask hidden" id="merge-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>合并口令</h3>
+                        <button class="modal-close" onclick="closeModal('merge-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="modal-desc">选择要合并的口令（至少2个），合并后原口令将失效</p>
+                        <div class="code-select-list" id="merge-code-list">
+                        </div>
+                        <p class="select-count">已选择 <span id="merge-count">0</span> 个口令</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('merge-modal')">取消</button>
+                        <button class="btn-primary" id="btn-merge-confirm">合并口令</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-mask hidden" id="add-category-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>添加分类</h3>
+                        <button class="modal-close" onclick="closeModal('add-category-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>分类名称</label>
+                            <input type="text" id="cat-name" placeholder="请输入分类名称">
+                        </div>
+                        <div class="form-group">
+                            <label>分类颜色</label>
+                            <input type="color" id="cat-color" value="#636E72">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('add-category-modal')">取消</button>
+                        <button class="btn-primary" id="btn-add-category-confirm">添加</button>
                     </div>
                 </div>
             </div>

@@ -77,7 +77,7 @@ body {
     font-size: 14px;
 }
 
-.form-group input {
+.form-group input, .form-group select {
     width: 100%;
     padding: 12px 14px;
     border: 1px solid #ddd;
@@ -86,7 +86,7 @@ body {
     transition: border-color 0.3s;
 }
 
-.form-group input:focus {
+.form-group input:focus, .form-group select:focus {
     outline: none;
     border-color: #667eea;
 }
@@ -304,6 +304,13 @@ body {
     color: white;
     font-size: 20px;
     font-weight: 600;
+    object-fit: cover;
+}
+
+.app-icon img {
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
 }
 
 .app-actions {
@@ -331,6 +338,44 @@ body {
     color: #666;
 }
 
+.app-category {
+    display: inline-block;
+    padding: 2px 8px;
+    background: #f0f4ff;
+    color: #667eea;
+    border-radius: 4px;
+    font-size: 12px;
+    margin-right: 8px;
+}
+
+.app-category-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #666;
+}
+
+.app-category-select label {
+    font-weight: 500;
+}
+
+.app-category-select .category-select {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    background: white;
+    cursor: pointer;
+}
+
+.app-category-select .category-select:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
 .app-codes {
     border-top: 1px solid #f0f0f0;
     padding-top: 12px;
@@ -342,7 +387,7 @@ body {
     margin-bottom: 8px;
 }
 
-.code-list {
+.code-list-container {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
@@ -405,6 +450,223 @@ body {
 
 .empty-icon {
     font-size: 48px;
+    margin-bottom: 16px;
+}
+
+/* Code List Page */
+.code-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+}
+
+.code-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.code-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.code-display {
+    font-size: 24px;
+    font-weight: 700;
+    font-family: monospace;
+    color: #667eea;
+    letter-spacing: 2px;
+}
+
+.code-delete-btn {
+    padding: 4px 10px;
+    background: #ffebee;
+    color: #e74c3c;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.code-card .app-list {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #f0f0f0;
+}
+
+.code-card .app-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 6px;
+}
+
+.code-card .app-item:last-child { margin-bottom: 0; }
+
+.code-card .app-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #667eea;
+}
+
+/* App Select List */
+.app-select-list, .code-select-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.select-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f5f5f5;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.select-item:hover { background: #f8f9fa; }
+.select-item:last-child { border-bottom: none; }
+
+.select-item.selected { background: #f0f4ff; }
+
+.select-checkbox {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.select-item.selected .select-checkbox {
+    background: #667eea;
+    border-color: #667eea;
+}
+
+.select-checkbox::after {
+    content: '✓';
+    color: white;
+    font-size: 12px;
+    display: none;
+}
+
+.select-item.selected .select-checkbox::after { display: block; }
+
+.select-item-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 14px;
+}
+
+.select-item-icon img {
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+}
+
+.select-item-info { flex: 1; }
+.select-item-name { font-size: 14px; font-weight: 500; }
+.select-item-desc { font-size: 12px; color: #999; }
+
+.select-count {
+    text-align: right;
+    font-size: 13px;
+    color: #666;
+}
+
+.select-count span { font-weight: 600; color: #667eea; }
+
+/* Category Grid */
+.category-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.category-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.category-color {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+}
+
+.category-name {
+    flex: 1;
+    margin-left: 12px;
+    font-size: 15px;
+    font-weight: 500;
+}
+
+/* APK Info Preview */
+.apk-info-preview {
+    margin-top: 20px;
+    padding: 16px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.apk-info-preview h4 {
+    font-size: 14px;
+    margin-bottom: 12px;
+    color: #666;
+}
+
+.apk-info-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.apk-info-row:last-child { margin-bottom: 0; }
+
+.info-label {
+    width: 70px;
+    color: #999;
+}
+
+.info-value {
+    flex: 1;
+    color: #333;
+}
+
+.preview-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+}
+
+.modal-desc {
+    font-size: 13px;
+    color: #999;
     margin-bottom: 16px;
 }
 
@@ -650,4 +912,5 @@ body {
     .sidebar-header, .user-name, .user-role, .nav-item span:not(.nav-icon) { display: none; }
     .main-content { margin-left: 60px; }
     .app-grid { grid-template-columns: 1fr; }
+    .code-list { grid-template-columns: 1fr; }
 }

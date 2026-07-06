@@ -13,14 +13,21 @@ from urllib.parse import urlparse, parse_qs
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import re
 
+try:
+    from apkutils import APK
+    HAS_APKUTILS = True
+except ImportError:
+    HAS_APKUTILS = False
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = BASE_DIR / "uploads"
 APK_DIR = UPLOAD_DIR / "apks"
+ICON_DIR = UPLOAD_DIR / "icons"
 TEMPLATE_DIR = BASE_DIR / "server" / "templates"
 STATIC_DIR = BASE_DIR / "server" / "static"
 
-for d in [DATA_DIR, UPLOAD_DIR, APK_DIR]:
+for d in [DATA_DIR, UPLOAD_DIR, APK_DIR, ICON_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -55,10 +62,13 @@ def load_secret_key():
         save_json(CONFIG_FILE, config)
     return config['secret_key']
 
+
 SECRET_KEY = os.getenv("SECRET_KEY", load_secret_key())
 SUPER_ADMIN_USERNAME = os.getenv("SUPER_ADMIN_USERNAME", "admin")
 SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "admin123456")
 MAX_APPS_PER_USER = 100
+MAX_APPS_PER_CODE = 10
+MAX_CODES_TO_MERGE = 10
 CODE_LENGTH = 4
 CODE_CHARS = "0123456789ABCDEF"
 
@@ -118,6 +128,92 @@ def format_size(size_bytes):
         return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
 
+def parse_apk_info(file_path):
+    info = {
+        'app_name': '',
+        'package_name': '',
+        'version_name': '',
+        'version_code': 1,
+        'icon_data': None
+    }
+    if not HAS_APKUTILS:
+        return info
+
+    try:
+        apk = APK(file_path)
+        manifest = apk.get_manifest()
+
+        if 'package' in manifest:
+            info['package_name'] = manifest['package']
+
+        if 'versionName' in manifest:
+            info['version_name'] = manifest['versionName']
+
+        if 'versionCode' in manifest:
+            info['version_code'] = int(manifest['versionCode'])
+
+        app_name = ''
+        if 'application' in manifest:
+            app = manifest['application']
+            if 'label' in app:
+                app_name = str(app['label'])
+            elif app_name == '' and 'meta-data' in app:
+                for md in app['meta-data']:
+                    if md.get('name') == 'com.google.android.gms.appinvite.APP_NAME':
+                        app_name = md.get('value', '')
+                        break
+
+        if app_name == '' or app_name.startswith('@'):
+            res = apk.get_resource()
+            if res is not None:
+                try:
+                    strings = res.get_strings()
+                    if strings:
+                        app_name = list(strings.values())[0] if strings else ''
+                except:
+                    pass
+
+        info['app_name'] = app_name if app_name else ''
+
+        icon_path = None
+        if 'application' in manifest:
+            app = manifest['application']
+            if 'icon' in app:
+                icon_path = str(app['icon'])
+
+        if icon_path and icon_path.startswith('@'):
+            try:
+                res = apk.get_resource()
+                if res is not None:
+                    mipmap_dirs = ['mipmap-hdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi']
+                    drawable_dirs = ['drawable-hdpi', 'drawable-xhdpi', 'drawable-xxhdpi', 'drawable-xxxhdpi']
+                    all_dirs = mipmap_dirs + drawable_dirs
+                    icon_name = icon_path[1:]
+                    for dir_name in all_dirs:
+                        for entry in apk.get_files():
+                            if dir_name in entry and icon_name in entry:
+                                icon_data = apk.get_file(entry)
+                                if icon_data:
+                                    info['icon_data'] = icon_data
+                                    break
+                        if info['icon_data']:
+                            break
+            except:
+                pass
+
+    except Exception as e:
+        print(f"APK解析错误: {e}")
+
+    return info
+
+
+def save_icon(app_id, icon_data):
+    icon_path = ICON_DIR / f"{app_id}.png"
+    with open(icon_path, 'wb') as f:
+        f.write(icon_data)
+    return str(icon_path)
+
+
 def get_users():
     return load_json(USERS_FILE, [])
 
@@ -151,7 +247,20 @@ def save_invites(invites):
 
 
 def get_categories():
-    return load_json(CATEGORIES_FILE, [])
+    cats = load_json(CATEGORIES_FILE, [])
+    if not cats:
+        cats = [
+            {'id': 1, 'name': '影音娱乐', 'color': '#FF6B6B'},
+            {'id': 2, 'name': '工具软件', 'color': '#4ECDC4'},
+            {'id': 3, 'name': '游戏', 'color': '#FFE66D'},
+            {'id': 4, 'name': '社交聊天', 'color': '#95E1D3'},
+            {'id': 5, 'name': '办公商务', 'color': '#A29BFE'},
+            {'id': 6, 'name': '教育学习', 'color': '#FD79A8'},
+            {'id': 7, 'name': '购物支付', 'color': '#00B894'},
+            {'id': 8, 'name': '其他', 'color': '#636E72'}
+        ]
+        save_categories(cats)
+    return cats
 
 
 def save_categories(categories):
@@ -232,6 +341,8 @@ def init_data():
         }
         users.append(admin)
         save_users(users)
+
+    get_categories()
 
 
 def next_id(items):
@@ -339,6 +450,15 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_download(code_str)
             return
 
+        if path.startswith('/api/icons/'):
+            icon_name = path[len('/api/icons/'):]
+            icon_path = ICON_DIR / icon_name
+            if icon_path.exists() and icon_path.is_file():
+                self.send_file(icon_path, 'image/png')
+            else:
+                self.send_error_json('图标不存在', 404)
+            return
+
         if path.startswith('/api/'):
             self.handle_api_get(path, parsed)
             return
@@ -364,6 +484,16 @@ class Handler(BaseHTTPRequestHandler):
 
         self.send_error_json('Not Found', 404)
 
+    def do_PUT(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path.startswith('/api/'):
+            self.handle_api_put(path, parsed)
+            return
+
+        self.send_error_json('Not Found', 404)
+
     def do_DELETE(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -378,7 +508,7 @@ class Handler(BaseHTTPRequestHandler):
         params = parse_qs(parsed.query)
 
         if path == '/api/health':
-            self.send_json({'status': 'ok', 'version': '2.0.0'})
+            self.send_json({'status': 'ok', 'version': '2.1.0'})
             return
 
         if path == '/api/auth/me':
@@ -403,9 +533,17 @@ class Handler(BaseHTTPRequestHandler):
             user_apps = [a for a in apps if a['owner_id'] == user['id']]
             user_apps.sort(key=lambda x: x['id'], reverse=True)
             codes = get_codes()
+            categories = get_categories()
+            cat_map = {c['id']: c for c in categories}
             result = []
             for app in user_apps:
-                app_codes = [c['code'] for c in codes if c['app_id'] == app['id'] and c['is_active']]
+                app_codes = []
+                for c in codes:
+                    app_ids = c.get('app_ids', [])
+                    if c['app_id'] == app['id'] or app['id'] in app_ids:
+                        if c['is_active']:
+                            app_codes.append(c['code'])
+                cat_name = cat_map.get(app.get('category_id'), {}).get('name', '')
                 result.append({
                     'id': app['id'],
                     'name': app['name'],
@@ -415,6 +553,9 @@ class Handler(BaseHTTPRequestHandler):
                     'apk_size_str': format_size(app['apk_size']),
                     'download_count': app['download_count'],
                     'is_duplicate': app['is_duplicate'],
+                    'category_id': app.get('category_id', 0),
+                    'category_name': cat_name,
+                    'icon_url': app.get('icon_url', ''),
                     'created_at': app['created_at'],
                     'codes': app_codes
                 })
@@ -448,6 +589,50 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/download/info/'):
             code_str = path[len('/api/download/info/'):]
             self.handle_download_info(code_str)
+            return
+
+        if path == '/api/categories':
+            user = self.get_current_user()
+            if not user:
+                self.send_error_json('未授权', 401)
+                return
+            self.send_json(get_categories())
+            return
+
+        if path == '/api/my/codes':
+            user = self.get_current_user()
+            if not user:
+                self.send_error_json('未授权', 401)
+                return
+            codes = get_codes()
+            apps = get_apps()
+            categories = get_categories()
+            cat_map = {c['id']: c for c in categories}
+            result = []
+            for c in sorted(codes, key=lambda x: x['id'], reverse=True):
+                if c['owner_id'] != user['id'] or not c['is_active']:
+                    continue
+                app_ids = c.get('app_ids', [])
+                if not app_ids and c.get('app_id'):
+                    app_ids = [c['app_id']]
+                code_apps = []
+                for aid in app_ids:
+                    app = get_app_by_id(aid)
+                    if app:
+                        cat_name = cat_map.get(app.get('category_id'), {}).get('name', '')
+                        code_apps.append({
+                            'id': app['id'],
+                            'name': app['name'],
+                            'category_name': cat_name
+                        })
+                result.append({
+                    'id': c['id'],
+                    'code': c['code'],
+                    'app_ids': app_ids,
+                    'apps': code_apps,
+                    'created_at': c['created_at']
+                })
+            self.send_json(result)
             return
 
         if path == '/api/admin/users':
@@ -534,6 +719,18 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_generate_code(app_id)
             return
 
+        if path == '/api/codes/merge':
+            self.handle_merge_codes()
+            return
+
+        if path == '/api/codes/create-multi':
+            self.handle_create_multi_code()
+            return
+
+        if path == '/api/categories':
+            self.handle_create_category()
+            return
+
         if path.startswith('/api/admin/users/') and path.endswith('/toggle-admin'):
             user_id = int(path.split('/')[-2])
             self.handle_toggle_admin(user_id)
@@ -550,6 +747,17 @@ class Handler(BaseHTTPRequestHandler):
 
         self.send_error_json('Not Found', 404)
 
+    def handle_api_put(self, path, parsed):
+        if path.startswith('/api/apps/'):
+            try:
+                app_id = int(path.rsplit('/', 1)[-1])
+                self.handle_update_app(app_id)
+            except:
+                self.send_error_json('Not Found', 404)
+            return
+
+        self.send_error_json('Not Found', 404)
+
     def handle_api_delete(self, path, parsed):
         if path.startswith('/api/apps/') and '/codes/' in path:
             parts = path.split('/')
@@ -562,6 +770,22 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 app_id = int(path.rsplit('/', 1)[-1])
                 self.handle_delete_app(app_id)
+            except:
+                self.send_error_json('Not Found', 404)
+            return
+
+        if path.startswith('/api/codes/'):
+            try:
+                code_id = int(path.rsplit('/', 1)[-1])
+                self.handle_delete_code_by_id(code_id)
+            except:
+                self.send_error_json('Not Found', 404)
+            return
+
+        if path.startswith('/api/categories/'):
+            try:
+                cat_id = int(path.rsplit('/', 1)[-1])
+                self.handle_delete_category(cat_id)
             except:
                 self.send_error_json('Not Found', 404)
             return
@@ -717,18 +941,30 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         apk_size = len(file_data)
-        app_name = (form.get('app_name') or filename.rsplit('.', 1)[0])
-        if isinstance(app_name, dict):
-            app_name = filename.rsplit('.', 1)[0]
-        package_name = f"com.uploaded.{secrets.token_hex(4)}"
-        version_name = "1.0"
-
         file_id = str(uuid.uuid4())
         save_name = f"{file_id}.apk"
         save_path = APK_DIR / save_name
 
         with open(save_path, 'wb') as f:
             f.write(file_data)
+
+        apk_info = parse_apk_info(str(save_path))
+        app_name = apk_info['app_name'] if apk_info['app_name'] else (form.get('app_name') or filename.rsplit('.', 1)[0])
+        if isinstance(app_name, dict):
+            app_name = filename.rsplit('.', 1)[0]
+        package_name = apk_info['package_name'] if apk_info['package_name'] else f"com.uploaded.{secrets.token_hex(4)}"
+        version_name = apk_info['version_name'] if apk_info['version_name'] else "1.0"
+
+        icon_url = ''
+        if apk_info['icon_data']:
+            app_id_temp = next_id(apps)
+            icon_path = save_icon(app_id_temp, apk_info['icon_data'])
+            icon_url = f'/api/icons/{app_id_temp}.png'
+
+        category_id = 0
+        cat_str = form.get('category_id')
+        if cat_str and cat_str.isdigit():
+            category_id = int(cat_str)
 
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         app_id = next_id(apps)
@@ -737,6 +973,7 @@ class Handler(BaseHTTPRequestHandler):
             'name': app_name,
             'package_name': package_name,
             'version_name': version_name,
+            'version_code': apk_info['version_code'],
             'apk_path': str(save_path),
             'apk_size': apk_size,
             'description': '',
@@ -744,6 +981,8 @@ class Handler(BaseHTTPRequestHandler):
             'real_app_id': None,
             'is_duplicate': False,
             'download_count': 0,
+            'category_id': category_id,
+            'icon_url': icon_url,
             'created_at': now
         }
         apps.append(app)
@@ -763,12 +1002,17 @@ class Handler(BaseHTTPRequestHandler):
             'id': code_id,
             'code': code_str,
             'app_id': app_id,
+            'app_ids': [],
             'owner_id': user['id'],
             'is_active': True,
             'created_at': now
         }
         codes.append(code)
         save_codes(codes)
+
+        categories = get_categories()
+        cat_map = {c['id']: c for c in categories}
+        cat_name = cat_map.get(category_id, {}).get('name', '')
 
         self.send_json({
             'id': app['id'],
@@ -779,6 +1023,9 @@ class Handler(BaseHTTPRequestHandler):
             'apk_size_str': format_size(app['apk_size']),
             'is_duplicate': app['is_duplicate'],
             'download_count': app['download_count'],
+            'category_id': category_id,
+            'category_name': cat_name,
+            'icon_url': icon_url,
             'created_at': app['created_at'],
             'codes': [code_str]
         })
@@ -813,6 +1060,7 @@ class Handler(BaseHTTPRequestHandler):
             'id': next_id(codes),
             'code': code_str,
             'app_id': app_id,
+            'app_ids': [],
             'owner_id': user['id'],
             'is_active': True,
             'created_at': now
@@ -820,6 +1068,253 @@ class Handler(BaseHTTPRequestHandler):
         codes.append(code)
         save_codes(codes)
         self.send_json({'code': code_str})
+
+    def handle_merge_codes(self):
+        user = self.get_current_user()
+        if not user:
+            self.send_error_json('未授权', 401)
+            return
+
+        body = self.parse_json_body()
+        source_code_ids = body.get('code_ids', [])
+
+        if len(source_code_ids) < 2:
+            self.send_error_json('至少选择2个口令进行合并')
+            return
+
+        if len(source_code_ids) > MAX_CODES_TO_MERGE:
+            self.send_error_json(f'最多合并{MAX_CODES_TO_MERGE}个口令')
+            return
+
+        codes = get_codes()
+        apps = get_apps()
+        user_codes = [c for c in codes if c['owner_id'] == user['id'] and c['is_active']]
+
+        selected_codes = []
+        all_app_ids = []
+        for cid in source_code_ids:
+            found = False
+            for c in user_codes:
+                if c['id'] == cid:
+                    found = True
+                    selected_codes.append(c)
+                    app_ids = c.get('app_ids', [])
+                    if not app_ids and c.get('app_id'):
+                        app_ids = [c['app_id']]
+                    for aid in app_ids:
+                        if aid not in all_app_ids:
+                            all_app_ids.append(aid)
+                    break
+            if not found:
+                self.send_error_json(f'口令ID {cid} 不存在或无权操作')
+                return
+
+        if len(all_app_ids) > MAX_APPS_PER_CODE:
+            self.send_error_json(f'合并后应用数量不能超过{MAX_APPS_PER_CODE}个')
+            return
+
+        for c in selected_codes:
+            c['is_active'] = False
+        save_codes(codes)
+
+        for _ in range(100):
+            new_code_str = generate_code()
+            if not any(c['code'] == new_code_str for c in codes):
+                break
+        else:
+            self.send_error_json('生成口令失败，请重试', 500)
+            return
+
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        new_code = {
+            'id': next_id(codes),
+            'code': new_code_str,
+            'app_id': None,
+            'app_ids': all_app_ids,
+            'owner_id': user['id'],
+            'is_active': True,
+            'created_at': now
+        }
+        codes.append(new_code)
+        save_codes(codes)
+
+        merged_apps = []
+        categories = get_categories()
+        cat_map = {c['id']: c for c in categories}
+        for aid in all_app_ids:
+            app = get_app_by_id(aid)
+            if app:
+                cat_name = cat_map.get(app.get('category_id'), {}).get('name', '')
+                merged_apps.append({
+                    'id': app['id'],
+                    'name': app['name'],
+                    'category_name': cat_name
+                })
+
+        self.send_json({
+            'code': new_code_str,
+            'app_ids': all_app_ids,
+            'apps': merged_apps,
+            'message': f'成功合并{len(source_code_ids)}个口令，共{len(all_app_ids)}个应用'
+        })
+
+    def handle_create_multi_code(self):
+        user = self.get_current_user()
+        if not user:
+            self.send_error_json('未授权', 401)
+            return
+
+        body = self.parse_json_body()
+        app_ids = body.get('app_ids', [])
+
+        if not app_ids:
+            self.send_error_json('请选择应用')
+            return
+
+        if len(app_ids) > MAX_APPS_PER_CODE:
+            self.send_error_json(f'一个口令最多包含{MAX_APPS_PER_CODE}个应用')
+            return
+
+        apps = get_apps()
+        for aid in app_ids:
+            found = False
+            for a in apps:
+                if a['id'] == aid and a['owner_id'] == user['id']:
+                    found = True
+                    break
+            if not found:
+                self.send_error_json(f'应用ID {aid} 不存在或无权操作')
+                return
+
+        codes = get_codes()
+        for _ in range(100):
+            code_str = generate_code()
+            if not any(c['code'] == code_str for c in codes):
+                break
+        else:
+            self.send_error_json('生成口令失败，请重试', 500)
+            return
+
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        code = {
+            'id': next_id(codes),
+            'code': code_str,
+            'app_id': None,
+            'app_ids': app_ids,
+            'owner_id': user['id'],
+            'is_active': True,
+            'created_at': now
+        }
+        codes.append(code)
+        save_codes(codes)
+
+        merged_apps = []
+        categories = get_categories()
+        cat_map = {c['id']: c for c in categories}
+        for aid in app_ids:
+            app = get_app_by_id(aid)
+            if app:
+                cat_name = cat_map.get(app.get('category_id'), {}).get('name', '')
+                merged_apps.append({
+                    'id': app['id'],
+                    'name': app['name'],
+                    'category_name': cat_name
+                })
+
+        self.send_json({
+            'code': code_str,
+            'app_ids': app_ids,
+            'apps': merged_apps,
+            'message': f'成功创建口令，包含{len(app_ids)}个应用'
+        })
+
+    def handle_create_category(self):
+        user = self.get_current_user()
+        if not user or not user['is_admin']:
+            self.send_error_json('需要管理员权限', 403)
+            return
+
+        body = self.parse_json_body()
+        name = body.get('name', '').strip()
+        color = body.get('color', '#636E72')
+
+        if not name:
+            self.send_error_json('分类名称不能为空')
+            return
+
+        categories = get_categories()
+        if any(c['name'] == name for c in categories):
+            self.send_error_json('分类名称已存在')
+            return
+
+        new_cat = {
+            'id': next_id(categories),
+            'name': name,
+            'color': color
+        }
+        categories.append(new_cat)
+        save_categories(categories)
+        self.send_json(new_cat)
+
+    def handle_update_app(self, app_id):
+        user = self.get_current_user()
+        if not user:
+            self.send_error_json('未授权', 401)
+            return
+
+        apps = get_apps()
+        app = None
+        for a in apps:
+            if a['id'] == app_id and a['owner_id'] == user['id']:
+                app = a
+                break
+        if not app:
+            self.send_error_json('应用不存在', 404)
+            return
+
+        body = self.parse_json_body()
+        category_id = body.get('category_id', 0)
+
+        if category_id:
+            categories = get_categories()
+            if not any(c['id'] == category_id for c in categories):
+                self.send_error_json('分类不存在', 404)
+                return
+
+        app['category_id'] = category_id
+        save_apps(apps)
+
+        cat_name = ''
+        if category_id:
+            cat = get_category_by_id(category_id)
+            if cat:
+                cat_name = cat.get('name', '')
+
+        self.send_json({
+            'id': app['id'],
+            'category_id': category_id,
+            'category_name': cat_name
+        })
+
+    def handle_delete_category(self, cat_id):
+        user = self.get_current_user()
+        if not user or not user['is_admin']:
+            self.send_error_json('需要管理员权限', 403)
+            return
+
+        categories = get_categories()
+        if not any(c['id'] == cat_id for c in categories):
+            self.send_error_json('分类不存在', 404)
+            return
+
+        apps = get_apps()
+        if any(a.get('category_id') == cat_id for a in apps):
+            self.send_error_json('该分类下还有应用，无法删除')
+            return
+
+        categories = [c for c in categories if c['id'] != cat_id]
+        save_categories(categories)
+        self.send_json({'message': '删除成功'})
 
     def handle_delete_app(self, app_id):
         user = self.get_current_user()
@@ -845,11 +1340,27 @@ class Handler(BaseHTTPRequestHandler):
                 except:
                     pass
 
+        if app.get('icon_url'):
+            icon_name = app['icon_url'].split('/')[-1]
+            icon_path = ICON_DIR / icon_name
+            if icon_path.exists():
+                try:
+                    icon_path.unlink()
+                except:
+                    pass
+
         apps = [a for a in apps if a['id'] != app_id]
         save_apps(apps)
 
         codes = get_codes()
-        codes = [c for c in codes if c['app_id'] != app_id]
+        for c in codes:
+            app_ids = c.get('app_ids', [])
+            if c['app_id'] == app_id:
+                c['is_active'] = False
+            elif app_id in app_ids:
+                app_ids.remove(app_id)
+                if not app_ids:
+                    c['is_active'] = False
         save_codes(codes)
 
         self.send_json({'message': '删除成功'})
@@ -874,6 +1385,25 @@ class Handler(BaseHTTPRequestHandler):
         found = False
         for c in codes:
             if c['code'] == code_str and c['app_id'] == app_id:
+                c['is_active'] = False
+                found = True
+                break
+        if not found:
+            self.send_error_json('口令不存在', 404)
+            return
+        save_codes(codes)
+        self.send_json({'message': '口令已删除'})
+
+    def handle_delete_code_by_id(self, code_id):
+        user = self.get_current_user()
+        if not user:
+            self.send_error_json('未授权', 401)
+            return
+
+        codes = get_codes()
+        found = False
+        for c in codes:
+            if c['id'] == code_id and c['owner_id'] == user['id']:
                 c['is_active'] = False
                 found = True
                 break
@@ -955,7 +1485,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json('口令无效', 404)
             return
 
-        app = get_app_by_id(code_obj['app_id'])
+        app_ids = code_obj.get('app_ids', [])
+        if not app_ids and code_obj.get('app_id'):
+            app_ids = [code_obj['app_id']]
+
+        if not app_ids:
+            self.send_error_json('口令无效', 404)
+            return
+
+        app = get_app_by_id(app_ids[0])
         if not app:
             self.send_error_json('应用不存在', 404)
             return
@@ -1010,7 +1548,7 @@ class Handler(BaseHTTPRequestHandler):
                 'name': target_app['name'],
                 'package_name': target_app['package_name'],
                 'version_name': target_app['version_name'],
-                'version_code': 1,
+                'version_code': target_app.get('version_code', 1),
                 'apk_size': target_app['apk_size'],
                 'download_url': f'/api/download/{code_str}/{target_app["id"]}',
                 'description': target_app.get('description', ''),
