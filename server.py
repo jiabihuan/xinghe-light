@@ -10,7 +10,7 @@ import uuid
 import mimetypes
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 import re
 
 try:
@@ -512,6 +512,8 @@ def get_code_by_code(code_str):
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 300
+
     def log_message(self, format, *args):
         pass
 
@@ -2230,7 +2232,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def run(host='0.0.0.0', port=8000):
     init_data()
-    server = HTTPServer((host, port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
+    server.daemon_threads = True
     print(f"服务器启动: http://{host}:{port}")
     print(f"管理员账号: {SUPER_ADMIN_USERNAME} / {SUPER_ADMIN_PASSWORD}")
     server.serve_forever()
