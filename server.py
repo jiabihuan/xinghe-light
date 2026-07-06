@@ -419,6 +419,11 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path.startswith('/api/codes/'):
+            code_str = path[len('/api/codes/'):]
+            self.handle_code_info_app(code_str)
+            return
+
         if path == '/api/download/info/':
             code_str = path.rsplit('/', 1)[-1] if '/' in path else ''
             self.handle_download_info(code_str)
@@ -925,6 +930,38 @@ class Handler(BaseHTTPRequestHandler):
             'apk_size': target_app['apk_size'],
             'download_count': target_app['download_count'],
             'download_url': f'/api/download/{code_str}'
+        })
+
+    def handle_code_info_app(self, code_str):
+        code_obj = get_code_by_code(code_str)
+        if not code_obj:
+            self.send_error_json('口令无效', 404)
+            return
+
+        app = get_app_by_id(code_obj['app_id'])
+        if not app:
+            self.send_error_json('应用不存在', 404)
+            return
+
+        target_app = app
+        if app['is_duplicate'] and app.get('real_app_id'):
+            real = get_app_by_id(app['real_app_id'])
+            if real:
+                target_app = real
+
+        self.send_json({
+            'type': 'single',
+            'app': {
+                'id': target_app['id'],
+                'name': target_app['name'],
+                'package_name': target_app['package_name'],
+                'version_name': target_app['version_name'],
+                'version_code': 1,
+                'apk_size': target_app['apk_size'],
+                'download_url': f'/api/download/{code_str}',
+                'description': target_app.get('description', ''),
+                'download_count': target_app['download_count']
+            }
         })
 
     def handle_toggle_admin(self, user_id):
