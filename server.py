@@ -29,20 +29,6 @@ APPS_FILE = DATA_DIR / "apps.json"
 CODES_FILE = DATA_DIR / "codes.json"
 INVITES_FILE = DATA_DIR / "invites.json"
 
-def load_secret_key():
-    config = load_json(CONFIG_FILE, {})
-    if 'secret_key' not in config:
-        config['secret_key'] = secrets.token_hex(32)
-        save_json(CONFIG_FILE, config)
-    return config['secret_key']
-
-SECRET_KEY = os.getenv("SECRET_KEY", load_secret_key())
-SUPER_ADMIN_USERNAME = os.getenv("SUPER_ADMIN_USERNAME", "admin")
-SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "admin123456")
-MAX_APPS_PER_USER = 100
-CODE_LENGTH = 4
-CODE_CHARS = "0123456789ABCDEF"
-
 
 def load_json(filepath, default):
     if not filepath.exists():
@@ -59,6 +45,21 @@ def save_json(filepath, data):
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     tmp.replace(filepath)
+
+
+def load_secret_key():
+    config = load_json(CONFIG_FILE, {})
+    if 'secret_key' not in config:
+        config['secret_key'] = secrets.token_hex(32)
+        save_json(CONFIG_FILE, config)
+    return config['secret_key']
+
+SECRET_KEY = os.getenv("SECRET_KEY", load_secret_key())
+SUPER_ADMIN_USERNAME = os.getenv("SUPER_ADMIN_USERNAME", "admin")
+SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "admin123456")
+MAX_APPS_PER_USER = 100
+CODE_LENGTH = 4
+CODE_CHARS = "0123456789ABCDEF"
 
 
 def hash_password(password: str) -> str:
