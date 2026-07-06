@@ -14,16 +14,16 @@ from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 import re
 
 try:
+    from pyaxmlparser import APK as PyAxmlAPK
+    HAS_PYAXML = True
+except ImportError:
+    HAS_PYAXML = False
+
+try:
     from apkutils import APK as ApkUtilsAPK
     HAS_APKUTILS = True
 except ImportError:
     HAS_APKUTILS = False
-
-try:
-    from apk_info import APK
-    HAS_APK_INFO = True
-except ImportError:
-    HAS_APK_INFO = False
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -163,30 +163,31 @@ def parse_apk_info(file_path):
         'icon_data': None
     }
 
-    if HAS_APK_INFO:
+    # 方案1：pyaxmlparser（纯Python，最可靠）
+    if HAS_PYAXML:
         try:
-            apk = APK(str(file_path))
+            apk = PyAxmlAPK(str(file_path))
 
-            info['package_name'] = apk.get_package_name() or ''
-            info['version_name'] = apk.get_version_name() or ''
+            info['package_name'] = apk.get_package() or ''
+            info['version_name'] = apk.get_androidversion_name() or ''
             try:
-                vc = apk.get_version_code()
+                vc = apk.get_androidversion_code()
                 if vc:
                     info['version_code'] = int(vc)
             except:
                 pass
 
             try:
-                label = apk.get_application_label()
-                if label and isinstance(label, str) and len(label) > 0 and not label.startswith('@') and not label.startswith('0x'):
-                    info['app_name'] = label
+                app_name = apk.get_app_name()
+                if app_name and isinstance(app_name, str) and len(app_name) > 0:
+                    info['app_name'] = app_name
             except:
                 pass
 
             try:
-                icon_res = apk.get_application_icon()
-                if icon_res and isinstance(icon_res, str) and len(icon_res) > 0:
-                    icon_data = apk.read(icon_res)
+                icon_path = apk.get_app_icon()
+                if icon_path:
+                    icon_data = apk.get_file(icon_path)
                     if icon_data and len(icon_data) > 0:
                         info['icon_data'] = icon_data
             except:
@@ -194,26 +195,35 @@ def parse_apk_info(file_path):
 
             if not info['icon_data']:
                 try:
-                    namelist = apk.namelist()
+                    icon_data = apk.icon_data
+                    if icon_data and len(icon_data) > 0:
+                        info['icon_data'] = icon_data
+                except:
+                    pass
+
+            if not info['icon_data']:
+                try:
+                    files = apk.get_files()
                     icon_patterns = [
-                        'res/mipmap-xxxhdpi-v4/', 'res/mipmap-xxhdpi-v4/', 'res/mipmap-xhdpi-v4/',
-                        'res/mipmap-hdpi-v4/', 'res/mipmap-mdpi-v4/',
-                        'res/drawable-xxxhdpi-v4/', 'res/drawable-xxhdpi-v4/', 'res/drawable-xhdpi-v4/',
-                        'res/drawable-hdpi-v4/', 'res/drawable-mdpi-v4/',
-                        'res/mipmap-xxxhdpi/', 'res/mipmap-xxhdpi/', 'res/mipmap-xhdpi/',
-                        'res/mipmap-hdpi/', 'res/mipmap-mdpi/',
+                        'mipmap-xxxhdpi-v4/', 'mipmap-xxhdpi-v4/', 'mipmap-xhdpi-v4/',
+                        'mipmap-hdpi-v4/', 'mipmap-mdpi-v4/',
+                        'drawable-xxxhdpi-v4/', 'drawable-xxhdpi-v4/', 'drawable-xhdpi-v4/',
+                        'drawable-hdpi-v4/', 'drawable-mdpi-v4/',
+                        'mipmap-xxxhdpi/', 'mipmap-xxhdpi/', 'mipmap-xhdpi/',
+                        'mipmap-hdpi/', 'mipmap-mdpi/',
                     ]
                     found = False
                     for pattern in icon_patterns:
                         if found:
                             break
-                        for entry in namelist:
-                            if pattern in entry and ('ic_launcher' in entry or 'app_icon' in entry or 'icon' in entry.lower()):
-                                if entry.endswith('.png') or entry.endswith('.webp') or entry.endswith('.jpg'):
+                        for entry in files:
+                            entry_name = entry if isinstance(entry, str) else entry.get('name', '')
+                            if pattern in entry_name and ('ic_launcher' in entry_name or 'app_icon' in entry_name or 'icon' in entry_name.lower()):
+                                if entry_name.endswith('.png') or entry_name.endswith('.webp') or entry_name.endswith('.jpg'):
                                     try:
-                                        icon_data = apk.read(entry)
-                                        if icon_data and len(icon_data) > 0:
-                                            info['icon_data'] = icon_data
+                                        data = apk.get_file(entry_name)
+                                        if data and len(data) > 0:
+                                            info['icon_data'] = data
                                             found = True
                                             break
                                     except:
@@ -223,103 +233,48 @@ def parse_apk_info(file_path):
 
             return info
         except Exception as e:
-            print(f"apk-info解析错误: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"pyaxmlparser解析错误: {e}")
 
-    if not HAS_APKUTILS:
-        return info
-
-    apk = None
-    try:
-        apk = ApkUtilsAPK.from_file(file_path)
-        apk.parse_resource()
-
-        info['package_name'] = apk.get_package_name() or ''
-        info['version_name'] = apk.version_name or ''
-        if hasattr(apk, '_version_code') and apk._version_code:
-            try:
-                info['version_code'] = int(apk._version_code)
-            except:
-                pass
-
-        if hasattr(apk, '_app_name') and apk._app_name:
-            app_name = str(apk._app_name)
-            if not app_name.startswith('@') and not app_name.startswith('0x'):
-                info['app_name'] = app_name
-
-        if not info['app_name']:
-            try:
-                manifest = apk.get_manifest()
-                if manifest:
-                    import xml.etree.ElementTree as ET
-                    root = ET.fromstring(manifest)
-                    app_tag = root.find('application')
-                    if app_tag is not None:
-                        label = app_tag.get('{http://schemas.android.com/apk/res/android}label')
-                        if label and not label.startswith('@'):
-                            info['app_name'] = str(label)
-            except:
-                pass
-
+    # 方案2：apkutils
+    if HAS_APKUTILS:
+        apk = None
         try:
-            icons = apk.get_app_icons()
-            if icons:
-                if isinstance(icons, list):
-                    for icon_data in reversed(icons):
-                        if icon_data and isinstance(icon_data, bytes) and len(icon_data) > 0:
-                            info['icon_data'] = icon_data
-                            break
-                elif isinstance(icons, bytes):
-                    info['icon_data'] = icons
-                elif isinstance(icons, dict):
-                    for key, icon_data in icons.items():
-                        if icon_data and isinstance(icon_data, bytes) and len(icon_data) > 0:
-                            info['icon_data'] = icon_data
-                            break
-        except:
-            pass
+            apk = ApkUtilsAPK.from_file(file_path)
+            apk.parse_resource()
 
-        if not info['icon_data']:
+            info['package_name'] = apk.get_package_name() or ''
+            info['version_name'] = apk.version_name or ''
+            if hasattr(apk, '_version_code') and apk._version_code:
+                try:
+                    info['version_code'] = int(apk._version_code)
+                except:
+                    pass
+
+            if hasattr(apk, '_app_name') and apk._app_name:
+                app_name = str(apk._app_name)
+                if not app_name.startswith('@') and not app_name.startswith('0x'):
+                    info['app_name'] = app_name
+
             try:
-                subfiles = apk.get_subfiles()
-                icon_patterns = [
-                    'mipmap-xxxhdpi-v4/', 'mipmap-xxhdpi-v4/', 'mipmap-xhdpi-v4/',
-                    'mipmap-hdpi-v4/', 'mipmap-mdpi-v4/',
-                    'drawable-xxxhdpi-v4/', 'drawable-xxhdpi-v4/', 'drawable-xhdpi-v4/',
-                    'drawable-hdpi-v4/', 'drawable-mdpi-v4/',
-                    'mipmap-xxxhdpi/', 'mipmap-xxhdpi/', 'mipmap-xhdpi/',
-                    'mipmap-hdpi/', 'mipmap-mdpi/',
-                ]
-                found = False
-                for pattern in icon_patterns:
-                    if found:
-                        break
-                    for entry in subfiles:
-                        entry_str = entry if isinstance(entry, str) else entry.get('name', '')
-                        if pattern in entry_str and ('ic_launcher' in entry_str or 'app_icon' in entry_str or 'icon' in entry_str.lower()):
-                            if entry_str.endswith('.png') or entry_str.endswith('.webp') or entry_str.endswith('.jpg'):
-                                try:
-                                    icon_data = apk.afile.read(entry_str)
-                                    if icon_data and len(icon_data) > 0:
-                                        info['icon_data'] = icon_data
-                                        found = True
-                                        break
-                                except:
-                                    continue
+                icons = apk.get_app_icons()
+                if icons:
+                    if isinstance(icons, list):
+                        for icon_data in reversed(icons):
+                            if icon_data and isinstance(icon_data, bytes) and len(icon_data) > 0:
+                                info['icon_data'] = icon_data
+                                break
+                    elif isinstance(icons, bytes):
+                        info['icon_data'] = icons
             except:
                 pass
-
-    except Exception as e:
-        print(f"apkutils解析错误: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        if apk:
-            try:
-                apk.close()
-            except:
-                pass
+        except Exception as e:
+            print(f"apkutils解析错误: {e}")
+        finally:
+            if apk:
+                try:
+                    apk.close()
+                except:
+                    pass
 
     return info
 
