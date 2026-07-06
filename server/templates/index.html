@@ -163,32 +163,32 @@
                     </div>
                 </div>
             </main>
-        </div>
 
-        <div class="modal-mask" id="upload-modal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h3>上传应用</h3>
-                    <button class="modal-close" onclick="closeModal('upload-modal')">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label>应用名称（可选）</label>
-                        <input type="text" id="upload-app-name" placeholder="留空则使用文件名">
+            <div class="modal-mask hidden" id="upload-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>上传应用</h3>
+                        <button class="modal-close" onclick="closeModal('upload-modal')">&times;</button>
                     </div>
-                    <div class="form-group">
-                        <label>APK文件</label>
-                        <div class="upload-area" id="upload-area">
-                            <div class="upload-icon">📁</div>
-                            <p>点击或拖拽APK文件到此处</p>
-                            <input type="file" id="upload-file" accept=".apk" hidden>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>应用名称（可选）</label>
+                            <input type="text" id="upload-app-name" placeholder="留空则使用文件名">
                         </div>
-                        <p class="file-name" id="file-name"></p>
+                        <div class="form-group">
+                            <label>APK文件</label>
+                            <div class="upload-area" id="upload-area">
+                                <div class="upload-icon">📁</div>
+                                <p>点击或拖拽APK文件到此处</p>
+                                <input type="file" id="upload-file" accept=".apk" hidden>
+                            </div>
+                            <p class="file-name" id="file-name"></p>
+                        </div>
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn-secondary" onclick="closeModal('upload-modal')">取消</button>
-                    <button class="btn-primary" id="btn-upload-confirm">上传</button>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('upload-modal')">取消</button>
+                        <button class="btn-primary" id="btn-upload-confirm">上传</button>
+                    </div>
                 </div>
             </div>
         </div>

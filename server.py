@@ -158,7 +158,8 @@ def parse_multipart(content_type, body):
     if boundary.startswith('--'):
         boundary = boundary[2:]
 
-    parts = body.split(b'--' + boundary.encode())
+    boundary_bytes = b'--' + boundary.encode()
+    parts = body.split(boundary_bytes)
     for part in parts:
         part = part.strip()
         if not part or part == b'--':
@@ -171,7 +172,11 @@ def parse_multipart(content_type, body):
         headers_text = part[:header_end].decode('utf-8', errors='ignore')
         content = part[header_end + 4:]
 
-        if content.endswith(b'\r\n'):
+        while content.endswith(b'\r\n'):
+            content = content[:-2]
+        if content.endswith(b'--'):
+            content = content[:-2]
+        while content.endswith(b'\r\n'):
             content = content[:-2]
 
         name_match = re.search(r'name="([^"]+)"', headers_text)
