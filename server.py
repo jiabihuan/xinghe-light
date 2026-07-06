@@ -1640,7 +1640,7 @@ class Handler(BaseHTTPRequestHandler):
             })
         else:
             self.send_json({
-                'type': 'multi',
+                'type': 'merged',
                 'categories': categories,
                 'apps': apps
             })
@@ -1704,7 +1704,7 @@ class Handler(BaseHTTPRequestHandler):
 
         self.send_json({
             'code': code_str,
-            'type': 'multi',
+            'type': 'merged',
             'categories': categories,
             'apps': apps
         })
