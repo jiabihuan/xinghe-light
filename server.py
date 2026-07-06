@@ -445,6 +445,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_file(TEMPLATE_DIR / 'index.html', 'text/html; charset=utf-8')
             return
 
+        if path.startswith('/api/download/info/'):
+            code_str = path[len('/api/download/info/'):]
+            self.handle_download_info(code_str)
+            return
+
         if path.startswith('/api/download/'):
             code_str = path[len('/api/download/'):]
             self.handle_download(code_str)
@@ -1570,7 +1575,7 @@ class Handler(BaseHTTPRequestHandler):
                 seen_cats.add(cid)
                 categories.append({'id': cid, 'name': a['category_name']})
 
-        if len(apps) == 1 and not categories:
+        if len(apps) == 1:
             self.send_json({
                 'type': 'single',
                 'app': apps[0]
