@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星河助手 - 应用分发平台</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <div id="login-page" class="page">
+            <div class="login-container">
+                <h1 class="logo">星河助手</h1>
+                <p class="subtitle">应用分发平台</p>
+                <div class="login-tabs">
+                    <button class="tab-btn active" data-tab="login">登录</button>
+                    <button class="tab-btn" data-tab="register">注册</button>
+                </div>
+                <form id="login-form" class="login-form">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="login-username" placeholder="请输入用户名">
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="login-password" placeholder="请输入密码">
+                    </div>
+                    <button type="submit" class="btn-primary">登录</button>
+                    <p class="error-msg" id="login-error"></p>
+                </form>
+                <form id="register-form" class="login-form hidden">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="reg-username" placeholder="至少3个字符">
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="reg-password" placeholder="至少6个字符">
+                    </div>
+                    <div class="form-group">
+                        <label>邀请码</label>
+                        <input type="text" id="reg-invite" placeholder="请输入邀请码">
+                    </div>
+                    <button type="submit" class="btn-primary">注册</button>
+                    <p class="error-msg" id="reg-error"></p>
+                </form>
+            </div>
+        </div>
+
+        <div id="main-page" class="page hidden">
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <h2 class="logo-small">星河助手</h2>
+                </div>
+                <nav class="sidebar-nav">
+                    <a href="#" class="nav-item active" data-page="apps">
+                        <span class="nav-icon">📦</span>
+                        <span>我的应用</span>
+                    </a>
+                    <a href="#" class="nav-item admin-only" data-page="admin" id="nav-admin">
+                        <span class="nav-icon">⚙️</span>
+                        <span>管理后台</span>
+                    </a>
+                </nav>
+                <div class="sidebar-footer">
+                    <div class="user-info">
+                        <span class="user-name" id="user-name">user</span>
+                        <span class="user-role" id="user-role"></span>
+                    </div>
+                    <button class="btn-logout" id="btn-logout">退出</button>
+                </div>
+            </aside>
+
+            <main class="main-content">
+                <div id="page-apps" class="content-page">
+                    <div class="page-header">
+                        <h2>我的应用</h2>
+                        <div class="header-actions">
+                            <span class="stat-badge" id="app-count">0 / 100</span>
+                            <button class="btn-primary" id="btn-upload">上传应用</button>
+                        </div>
+                    </div>
+                    <div class="app-grid" id="app-grid">
+                    </div>
+                    <div class="empty-state" id="empty-state">
+                        <div class="empty-icon">📭</div>
+                        <p>还没有上传应用，点击"上传应用"开始吧</p>
+                    </div>
+                </div>
+
+                <div id="page-admin" class="content-page hidden">
+                    <div class="admin-tabs">
+                        <button class="admin-tab active" data-admin-tab="users">用户管理</button>
+                        <button class="admin-tab" data-admin-tab="invites">邀请码管理</button>
+                        <button class="admin-tab" data-admin-tab="stats">数据统计</button>
+                    </div>
+
+                    <div id="admin-users" class="admin-panel">
+                        <div class="panel-header">
+                            <h3>用户列表</h3>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>用户名</th>
+                                        <th>应用数</th>
+                                        <th>角色</th>
+                                        <th>状态</th>
+                                        <th>注册时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="users-tbody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="admin-invites" class="admin-panel hidden">
+                        <div class="panel-header">
+                            <h3>邀请码列表</h3>
+                            <button class="btn-primary btn-small" id="btn-create-invite">生成邀请码</button>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>邀请码</th>
+                                        <th>使用次数</th>
+                                        <th>状态</th>
+                                        <th>创建时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invites-tbody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="admin-stats" class="admin-panel hidden">
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-users">0</div>
+                                <div class="stat-label">总用户数</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-apps">0</div>
+                                <div class="stat-label">总应用数</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-codes">0</div>
+                                <div class="stat-label">总口令数</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-invites">0</div>
+                                <div class="stat-label">邀请码总数</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <div class="modal-mask" id="upload-modal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>上传应用</h3>
+                    <button class="modal-close" onclick="closeModal('upload-modal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>应用名称（可选）</label>
+                        <input type="text" id="upload-app-name" placeholder="留空则使用文件名">
+                    </div>
+                    <div class="form-group">
+                        <label>APK文件</label>
+                        <div class="upload-area" id="upload-area">
+                            <div class="upload-icon">📁</div>
+                            <p>点击或拖拽APK文件到此处</p>
+                            <input type="file" id="upload-file" accept=".apk" hidden>
+                        </div>
+                        <p class="file-name" id="file-name"></p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary" onclick="closeModal('upload-modal')">取消</button>
+                    <button class="btn-primary" id="btn-upload-confirm">上传</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
