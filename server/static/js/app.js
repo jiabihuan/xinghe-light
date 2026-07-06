@@ -725,6 +725,294 @@ async function loadStats() {
     } catch {}
 }
 
+let adminUsers = [];
+let selectedPremiumAppIds = [];
+let currentPremiumCodeId = null;
+let adminChangePwdUserId = null;
+
+document.getElementById('btn-change-pwd').addEventListener('click', () => {
+    document.getElementById('old-password').value = '';
+    document.getElementById('new-password').value = '';
+    document.getElementById('confirm-password').value = '';
+    document.getElementById('change-pwd-modal').classList.remove('hidden');
+});
+
+document.getElementById('btn-change-pwd-confirm').addEventListener('click', async () => {
+    const oldPwd = document.getElementById('old-password').value;
+    const newPwd = document.getElementById('new-password').value;
+    const confirmPwd = document.getElementById('confirm-password').value;
+
+    if (!oldPwd || !newPwd || !confirmPwd) {
+        showToast('请填写所有密码字段', 'error');
+        return;
+    }
+    if (newPwd.length < 6) {
+        showToast('新密码至少6个字符', 'error');
+        return;
+    }
+    if (newPwd !== confirmPwd) {
+        showToast('两次输入的新密码不一致', 'error');
+        return;
+    }
+
+    try {
+        await api('/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
+        });
+        showToast('密码修改成功', 'success');
+        closeModal('change-pwd-modal');
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+});
+
+function openAdminChangePwd(userId, username) {
+    adminChangePwdUserId = userId;
+    document.getElementById('admin-pwd-username').value = username;
+    document.getElementById('admin-new-password').value = '';
+    document.getElementById('admin-change-pwd-modal').classList.remove('hidden');
+}
+
+document.getElementById('btn-admin-change-pwd-confirm').addEventListener('click', async () => {
+    const newPwd = document.getElementById('admin-new-password').value;
+
+    if (!newPwd || newPwd.length < 6) {
+        showToast('新密码至少6个字符', 'error');
+        return;
+    }
+
+    try {
+        await api('/admin/users/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: adminChangePwdUserId, new_password: newPwd })
+        });
+        showToast('密码修改成功', 'success');
+        closeModal('admin-change-pwd-modal');
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+});
+
+document.querySelectorAll('.admin-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        const t = tab.dataset.adminTab;
+        document.querySelectorAll('.admin-tab').forEach(tt => tt.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('admin-users').classList.toggle('hidden', t !== 'users');
+        document.getElementById('admin-invites').classList.toggle('hidden', t !== 'invites');
+        document.getElementById('admin-premium').classList.toggle('hidden', t !== 'premium');
+        document.getElementById('admin-categories').classList.toggle('hidden', t !== 'categories');
+        document.getElementById('admin-stats').classList.toggle('hidden', t !== 'stats');
+        if (t === 'categories') {
+            loadAdminCategories();
+        }
+        if (t === 'premium') {
+            loadPremiumCodes();
+        }
+        if (t === 'users') {
+            loadAdminUsers();
+        }
+    });
+});
+
+async function loadAdminUsers() {
+    try {
+        const users = await api('/admin/users');
+        adminUsers = users;
+        const tbody = document.getElementById('users-tbody');
+        tbody.innerHTML = users.map(u => `
+            <tr>
+                <td>${u.id}</td>
+                <td>${escapeHtml(u.username)}</td>
+                <td>${u.app_count}</td>
+                <td>
+                    <span class="role-badge ${u.is_super_admin ? 'role-admin' : ''}">
+                        ${u.is_super_admin ? '超管' : u.is_admin ? '管理员' : '用户'}
+                    </span>
+                </td>
+                <td>
+                    <span class="status-badge ${u.is_active ? 'status-active' : 'status-disabled'}">
+                        ${u.is_active ? '正常' : '禁用'}
+                    </span>
+                </td>
+                <td>${u.created_at}</td>
+                <td>
+                    ${!u.is_super_admin ? `
+                        <button class="action-btn edit" onclick="toggleAdmin(${u.id})">
+                            ${u.is_admin ? '取消管理' : '设为管理'}
+                        </button>
+                        <button class="action-btn edit" onclick="openAdminChangePwd(${u.id}, '${escapeHtml(u.username)}')">
+                            改密码
+                        </button>
+                        <button class="action-btn ${u.is_active ? 'delete' : 'edit'}" onclick="toggleActive(${u.id})">
+                            ${u.is_active ? '禁用' : '启用'}
+                        </button>
+                    ` : '-'}
+                </td>
+            </tr>
+        `).join('');
+    } catch {}
+}
+
+async function loadPremiumCodes() {
+    try {
+        const codes = await api('/admin/premium-codes');
+        const tbody = document.getElementById('premium-tbody');
+        
+        if (codes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999;padding:40px">暂无豹子号</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = codes.map(c => `
+            <tr>
+                <td>${c.id}</td>
+                <td><code style="background:#f0f4ff;padding:2px 8px;border-radius:4px;color:#667eea;font-weight:600">${c.code}</code></td>
+                <td>${c.app_ids ? c.app_ids.length : 0} 个</td>
+                <td>${c.note ? escapeHtml(c.note) : '-'}</td>
+                <td>
+                    <span class="status-badge ${c.is_used ? 'status-used' : 'status-unused'}">
+                        ${c.is_used ? '已分配' : '未分配'}
+                    </span>
+                </td>
+                <td>${c.assigned_user_id ? '用户ID: ' + c.assigned_user_id : '-'}</td>
+                <td>${c.created_at}</td>
+                <td>
+                    ${!c.is_used && c.is_active ? `
+                        <button class="action-btn edit" onclick="openAssignPremium(${c.id}, '${c.code}')">分配</button>
+                        <button class="action-btn delete" onclick="deletePremiumCode(${c.id})">删除</button>
+                    ` : '-'}
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        showToast('加载豹子号失败', 'error');
+    }
+}
+
+document.getElementById('btn-add-premium').addEventListener('click', () => {
+    if (apps.length === 0) {
+        showToast('请先上传应用', 'error');
+        return;
+    }
+    selectedPremiumAppIds = [];
+    document.getElementById('premium-code').value = '';
+    document.getElementById('premium-note').value = '';
+    
+    const list = document.getElementById('premium-app-list');
+    list.innerHTML = apps.map(app => {
+        const iconHtml = app.icon_url ?
+            `<img src="${app.icon_url}" alt="${escapeHtml(app.name)}">` :
+            escapeHtml(app.name.charAt(0));
+        return `
+            <div class="select-item" onclick="toggleSelectPremiumApp(${app.id}, this)">
+                <div class="select-checkbox"></div>
+                <div class="select-item-icon">${iconHtml}</div>
+                <div class="select-item-info">
+                    <div class="select-item-name">${escapeHtml(app.name)}</div>
+                    <div class="select-item-desc">${escapeHtml(app.package_name)}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    document.getElementById('premium-app-count').textContent = '0';
+    document.getElementById('add-premium-modal').classList.remove('hidden');
+});
+
+function toggleSelectPremiumApp(appId, el) {
+    const idx = selectedPremiumAppIds.indexOf(appId);
+    if (idx > -1) {
+        selectedPremiumAppIds.splice(idx, 1);
+        el.classList.remove('selected');
+    } else if (selectedPremiumAppIds.length < 10) {
+        selectedPremiumAppIds.push(appId);
+        el.classList.add('selected');
+    } else {
+        showToast('最多选择10个应用', 'error');
+    }
+    document.getElementById('premium-app-count').textContent = selectedPremiumAppIds.length;
+}
+
+document.getElementById('btn-add-premium-confirm').addEventListener('click', async () => {
+    const code = document.getElementById('premium-code').value.trim().toUpperCase();
+    const note = document.getElementById('premium-note').value.trim();
+
+    if (!code) {
+        showToast('请输入豹子号口令', 'error');
+        return;
+    }
+    if (code.length < 4) {
+        showToast('口令至少4个字符', 'error');
+        return;
+    }
+    if (selectedPremiumAppIds.length === 0) {
+        showToast('请选择应用', 'error');
+        return;
+    }
+
+    try {
+        await api('/admin/premium-codes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, app_ids: selectedPremiumAppIds, note })
+        });
+        showToast('豹子号添加成功', 'success');
+        closeModal('add-premium-modal');
+        loadPremiumCodes();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+});
+
+function openAssignPremium(codeId, codeStr) {
+    currentPremiumCodeId = codeId;
+    document.getElementById('assign-premium-code').value = codeStr;
+    
+    const select = document.getElementById('assign-user-select');
+    select.innerHTML = '<option value="">请选择用户</option>' +
+        adminUsers.filter(u => !u.is_super_admin).map(u => 
+            `<option value="${u.id}">${escapeHtml(u.username)}</option>`
+        ).join('');
+    
+    document.getElementById('assign-premium-modal').classList.remove('hidden');
+}
+
+document.getElementById('btn-assign-premium-confirm').addEventListener('click', async () => {
+    const userId = parseInt(document.getElementById('assign-user-select').value);
+    
+    if (!userId) {
+        showToast('请选择用户', 'error');
+        return;
+    }
+
+    try {
+        const res = await api('/admin/premium-codes/assign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ premium_code_id: currentPremiumCodeId, user_id: userId })
+        });
+        showToast(`分配成功，口令 ${res.code} 已分配给 ${res.username}`, 'success');
+        closeModal('assign-premium-modal');
+        loadPremiumCodes();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+});
+
+async function deletePremiumCode(codeId) {
+    if (!confirm('确定删除此豹子号?')) return;
+    try {
+        await api(`/admin/premium-codes/${codeId}`, { method: 'DELETE' });
+        showToast('删除成功', 'success');
+        loadPremiumCodes();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
 if (token) {
     enterApp();
 } else {

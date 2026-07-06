@@ -71,6 +71,7 @@
                         <span class="user-name" id="user-name">user</span>
                         <span class="user-role" id="user-role"></span>
                     </div>
+                    <button class="btn-change-pwd" id="btn-change-pwd">修改密码</button>
                     <button class="btn-logout" id="btn-logout">退出</button>
                 </div>
             </aside>
@@ -112,6 +113,7 @@
                     <div class="admin-tabs">
                         <button class="admin-tab active" data-admin-tab="users">用户管理</button>
                         <button class="admin-tab" data-admin-tab="invites">邀请码管理</button>
+                        <button class="admin-tab" data-admin-tab="premium">豹子号管理</button>
                         <button class="admin-tab" data-admin-tab="categories">分类管理</button>
                         <button class="admin-tab" data-admin-tab="stats">数据统计</button>
                     </div>
@@ -131,15 +133,40 @@
                                         <th>状态</th>
                                         <th>注册时间</th>
                                         <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="users-tbody">
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+                            </tr>
+                        </thead>
+                        <tbody id="users-tbody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
-                    <div id="admin-invites" class="admin-panel hidden">
+            <div id="admin-premium" class="admin-panel hidden">
+                <div class="panel-header">
+                    <h3>豹子号管理</h3>
+                    <button class="btn-primary btn-small" id="btn-add-premium">添加豹子号</button>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>豹子号</th>
+                                <th>应用数</th>
+                                <th>备注</th>
+                                <th>状态</th>
+                                <th>分配给</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="premium-tbody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="admin-invites" class="admin-panel hidden">
                         <div class="panel-header">
                             <h3>邀请码列表</h3>
                             <button class="btn-primary btn-small" id="btn-create-invite">生成邀请码</button>
@@ -304,6 +331,110 @@
                     <div class="modal-footer">
                         <button class="btn-secondary" onclick="closeModal('add-category-modal')">取消</button>
                         <button class="btn-primary" id="btn-add-category-confirm">添加</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-mask hidden" id="change-pwd-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>修改密码</h3>
+                        <button class="modal-close" onclick="closeModal('change-pwd-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>旧密码</label>
+                            <input type="password" id="old-password" placeholder="请输入旧密码">
+                        </div>
+                        <div class="form-group">
+                            <label>新密码</label>
+                            <input type="password" id="new-password" placeholder="至少6个字符">
+                        </div>
+                        <div class="form-group">
+                            <label>确认新密码</label>
+                            <input type="password" id="confirm-password" placeholder="再次输入新密码">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('change-pwd-modal')">取消</button>
+                        <button class="btn-primary" id="btn-change-pwd-confirm">确认修改</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-mask hidden" id="admin-change-pwd-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>修改用户密码</h3>
+                        <button class="modal-close" onclick="closeModal('admin-change-pwd-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>用户名</label>
+                            <input type="text" id="admin-pwd-username" disabled>
+                        </div>
+                        <div class="form-group">
+                            <label>新密码</label>
+                            <input type="password" id="admin-new-password" placeholder="至少6个字符">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('admin-change-pwd-modal')">取消</button>
+                        <button class="btn-primary" id="btn-admin-change-pwd-confirm">确认修改</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-mask hidden" id="add-premium-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>添加豹子号</h3>
+                        <button class="modal-close" onclick="closeModal('add-premium-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>豹子号口令</label>
+                            <input type="text" id="premium-code" placeholder="如：AAAA、8888、6666">
+                        </div>
+                        <div class="form-group">
+                            <label>选择应用（可多选，最多10个）</label>
+                            <div class="app-select-list" id="premium-app-list">
+                            </div>
+                            <p class="select-count">已选择 <span id="premium-app-count">0</span> / 10 个应用</p>
+                        </div>
+                        <div class="form-group">
+                            <label>备注（可选）</label>
+                            <input type="text" id="premium-note" placeholder="如：VIP专属、纪念号等">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('add-premium-modal')">取消</button>
+                        <button class="btn-primary" id="btn-add-premium-confirm">添加</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-mask hidden" id="assign-premium-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>分配豹子号</h3>
+                        <button class="modal-close" onclick="closeModal('assign-premium-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>豹子号</label>
+                            <input type="text" id="assign-premium-code" disabled>
+                        </div>
+                        <div class="form-group">
+                            <label>分配给用户</label>
+                            <select id="assign-user-select">
+                                <option value="">请选择用户</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('assign-premium-modal')">取消</button>
+                        <button class="btn-primary" id="btn-assign-premium-confirm">确认分配</button>
                     </div>
                 </div>
             </div>

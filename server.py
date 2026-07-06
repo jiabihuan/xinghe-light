@@ -36,6 +36,7 @@ APPS_FILE = DATA_DIR / "apps.json"
 CODES_FILE = DATA_DIR / "codes.json"
 INVITES_FILE = DATA_DIR / "invites.json"
 CATEGORIES_FILE = DATA_DIR / "categories.json"
+PREMIUM_CODES_FILE = DATA_DIR / "premium_codes.json"
 
 
 def load_json(filepath, default):
@@ -270,6 +271,21 @@ def save_categories(categories):
 def get_category_by_id(cat_id):
     for c in get_categories():
         if c['id'] == cat_id:
+            return c
+    return None
+
+
+def get_premium_codes():
+    return load_json(PREMIUM_CODES_FILE, [])
+
+
+def save_premium_codes(codes):
+    save_json(PREMIUM_CODES_FILE, codes)
+
+
+def get_premium_code_by_code(code_str):
+    for c in get_premium_codes():
+        if c['code'] == code_str and c['is_active']:
             return c
     return None
 
@@ -581,6 +597,16 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path.startswith('/api/codes/multi/'):
+            code_str = path[len('/api/codes/multi/'):]
+            self.handle_multi_code_info(code_str)
+            return
+
+        if path.startswith('/api/codes/single/'):
+            code_str = path[len('/api/codes/single/'):]
+            self.handle_single_code_info(code_str)
+            return
+
         if path.startswith('/api/codes/'):
             code_str = path[len('/api/codes/'):]
             self.handle_code_info_app(code_str)
@@ -594,6 +620,14 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/download/info/'):
             code_str = path[len('/api/download/info/'):]
             self.handle_download_info(code_str)
+            return
+
+        if path == '/api/admin/premium-codes':
+            user = self.get_current_user()
+            if not user or not user['is_super_admin']:
+                self.send_error_json('需要超级管理员权限', 403)
+                return
+            self.send_json(get_premium_codes())
             return
 
         if path == '/api/categories':
@@ -750,6 +784,22 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_create_invite()
             return
 
+        if path == '/api/admin/premium-codes':
+            self.handle_create_premium_code()
+            return
+
+        if path == '/api/auth/change-password':
+            self.handle_change_password()
+            return
+
+        if path == '/api/admin/users/change-password':
+            self.handle_admin_change_password()
+            return
+
+        if path == '/api/admin/premium-codes/assign':
+            self.handle_assign_premium_code()
+            return
+
         self.send_error_json('Not Found', 404)
 
     def handle_api_put(self, path, parsed):
@@ -799,6 +849,14 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 code_id = int(path.rsplit('/', 1)[-1])
                 self.handle_delete_invite(code_id)
+            except:
+                self.send_error_json('Not Found', 404)
+            return
+
+        if path.startswith('/api/admin/premium-codes/'):
+            try:
+                code_id = int(path.rsplit('/', 1)[-1])
+                self.handle_delete_premium_code(code_id)
             except:
                 self.send_error_json('Not Found', 404)
             return
@@ -1586,6 +1644,338 @@ class Handler(BaseHTTPRequestHandler):
                 'categories': categories,
                 'apps': apps
             })
+
+    def handle_multi_code_info(self, code_str):
+        code_obj = get_code_by_code(code_str)
+        if not code_obj:
+            self.send_error_json('组合码不存在', 404)
+            return
+
+        app_ids = code_obj.get('app_ids', [])
+        if not app_ids and code_obj.get('app_id'):
+            app_ids = [code_obj['app_id']]
+
+        if len(app_ids) < 2:
+            self.send_error_json('不是组合码', 404)
+            return
+
+        apps = []
+        for aid in app_ids:
+            app = get_app_by_id(aid)
+            if not app:
+                continue
+            target_app = app
+            if app['is_duplicate'] and app.get('real_app_id'):
+                real = get_app_by_id(app['real_app_id'])
+                if real:
+                    target_app = real
+            cat_id = target_app.get('category_id', 0)
+            cat_name = ''
+            if cat_id:
+                cat = get_category_by_id(cat_id)
+                if cat:
+                    cat_name = cat.get('name', '')
+            apps.append({
+                'id': target_app['id'],
+                'name': target_app['name'],
+                'package_name': target_app['package_name'],
+                'version_name': target_app['version_name'],
+                'version_code': target_app.get('version_code', 1),
+                'apk_size': target_app['apk_size'],
+                'download_url': f'/api/download/{code_str}/{target_app["id"]}',
+                'description': target_app.get('description', ''),
+                'download_count': target_app['download_count'],
+                'category_id': cat_id,
+                'category_name': cat_name,
+                'icon_url': target_app.get('icon_url', '')
+            })
+
+        if not apps:
+            self.send_error_json('应用不存在', 404)
+            return
+
+        categories = []
+        seen_cats = set()
+        for a in apps:
+            cid = a['category_id']
+            if cid and cid not in seen_cats:
+                seen_cats.add(cid)
+                categories.append({'id': cid, 'name': a['category_name']})
+
+        self.send_json({
+            'code': code_str,
+            'type': 'multi',
+            'categories': categories,
+            'apps': apps
+        })
+
+    def handle_single_code_info(self, code_str):
+        code_obj = get_code_by_code(code_str)
+        if not code_obj:
+            self.send_error_json('单码不存在', 404)
+            return
+
+        app_ids = code_obj.get('app_ids', [])
+        if not app_ids and code_obj.get('app_id'):
+            app_ids = [code_obj['app_id']]
+
+        if len(app_ids) != 1:
+            self.send_error_json('不是单码', 404)
+            return
+
+        app = get_app_by_id(app_ids[0])
+        if not app:
+            self.send_error_json('应用不存在', 404)
+            return
+
+        target_app = app
+        if app['is_duplicate'] and app.get('real_app_id'):
+            real = get_app_by_id(app['real_app_id'])
+            if real:
+                target_app = real
+
+        cat_id = target_app.get('category_id', 0)
+        cat_name = ''
+        if cat_id:
+            cat = get_category_by_id(cat_id)
+            if cat:
+                cat_name = cat.get('name', '')
+
+        self.send_json({
+            'code': code_str,
+            'type': 'single',
+            'app': {
+                'id': target_app['id'],
+                'name': target_app['name'],
+                'package_name': target_app['package_name'],
+                'version_name': target_app['version_name'],
+                'version_code': target_app.get('version_code', 1),
+                'apk_size': target_app['apk_size'],
+                'download_url': f'/api/download/{code_str}/{target_app["id"]}',
+                'description': target_app.get('description', ''),
+                'download_count': target_app['download_count'],
+                'category_id': cat_id,
+                'category_name': cat_name,
+                'icon_url': target_app.get('icon_url', '')
+            }
+        })
+
+    def handle_change_password(self):
+        user = self.get_current_user()
+        if not user:
+            self.send_error_json('未授权', 401)
+            return
+
+        body = self.parse_json_body()
+        old_password = body.get('old_password', '')
+        new_password = body.get('new_password', '')
+
+        if not old_password or not new_password:
+            self.send_error_json('旧密码和新密码不能为空')
+            return
+
+        if len(new_password) < 6:
+            self.send_error_json('新密码至少6个字符')
+            return
+
+        users = get_users()
+        target = None
+        for u in users:
+            if u['id'] == user['id']:
+                target = u
+                break
+
+        if not target:
+            self.send_error_json('用户不存在', 404)
+            return
+
+        if not verify_password(old_password, target['password_hash']):
+            self.send_error_json('旧密码错误')
+            return
+
+        target['password_hash'] = hash_password(new_password)
+        save_users(users)
+        self.send_json({'message': '密码修改成功'})
+
+    def handle_admin_change_password(self):
+        current = self.get_current_user()
+        if not current or not current['is_super_admin']:
+            self.send_error_json('需要超级管理员权限', 403)
+            return
+
+        body = self.parse_json_body()
+        user_id = body.get('user_id', 0)
+        new_password = body.get('new_password', '')
+
+        if not user_id:
+            self.send_error_json('用户ID不能为空')
+            return
+
+        if not new_password or len(new_password) < 6:
+            self.send_error_json('新密码至少6个字符')
+            return
+
+        users = get_users()
+        target = None
+        for u in users:
+            if u['id'] == user_id:
+                target = u
+                break
+
+        if not target:
+            self.send_error_json('用户不存在', 404)
+            return
+
+        target['password_hash'] = hash_password(new_password)
+        save_users(users)
+        self.send_json({'message': '密码修改成功'})
+
+    def handle_create_premium_code(self):
+        user = self.get_current_user()
+        if not user or not user['is_super_admin']:
+            self.send_error_json('需要超级管理员权限', 403)
+            return
+
+        body = self.parse_json_body()
+        code_str = body.get('code', '').strip().upper()
+        app_id = body.get('app_id', 0)
+        app_ids = body.get('app_ids', [])
+        note = body.get('note', '')
+
+        if not code_str:
+            self.send_error_json('口令不能为空')
+            return
+
+        if len(code_str) < 4:
+            self.send_error_json('口令至少4个字符')
+            return
+
+        premium_codes = get_premium_codes()
+        if any(c['code'] == code_str for c in premium_codes):
+            self.send_error_json('该豹子号已存在')
+            return
+
+        codes = get_codes()
+        if any(c['code'] == code_str and c['is_active'] for c in codes):
+            self.send_error_json('该口令已被使用')
+            return
+
+        if app_ids:
+            if len(app_ids) > MAX_APPS_PER_CODE:
+                self.send_error_json(f'最多{MAX_APPS_PER_CODE}个应用')
+                return
+            for aid in app_ids:
+                if not get_app_by_id(aid):
+                    self.send_error_json(f'应用ID {aid} 不存在', 404)
+                    return
+        elif app_id:
+            if not get_app_by_id(app_id):
+                self.send_error_json('应用不存在', 404)
+                return
+            app_ids = [app_id]
+        else:
+            self.send_error_json('请选择应用')
+            return
+
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        new_code = {
+            'id': next_id(premium_codes),
+            'code': code_str,
+            'app_ids': app_ids,
+            'note': note,
+            'is_active': True,
+            'is_used': False,
+            'assigned_user_id': None,
+            'created_by': user['id'],
+            'created_at': now
+        }
+        premium_codes.append(new_code)
+        save_premium_codes(premium_codes)
+        self.send_json(new_code)
+
+    def handle_assign_premium_code(self):
+        user = self.get_current_user()
+        if not user or not user['is_super_admin']:
+            self.send_error_json('需要超级管理员权限', 403)
+            return
+
+        body = self.parse_json_body()
+        premium_code_id = body.get('premium_code_id', 0)
+        target_user_id = body.get('user_id', 0)
+
+        if not premium_code_id or not target_user_id:
+            self.send_error_json('参数错误')
+            return
+
+        premium_codes = get_premium_codes()
+        premium_code = None
+        for pc in premium_codes:
+            if pc['id'] == premium_code_id and pc['is_active']:
+                premium_code = pc
+                break
+
+        if not premium_code:
+            self.send_error_json('豹子号不存在', 404)
+            return
+
+        if premium_code['is_used']:
+            self.send_error_json('该豹子号已被使用')
+            return
+
+        target_user = get_user_by_id(target_user_id)
+        if not target_user:
+            self.send_error_json('目标用户不存在', 404)
+            return
+
+        codes = get_codes()
+        if any(c['code'] == premium_code['code'] and c['is_active'] for c in codes):
+            self.send_error_json('该口令已被使用')
+            return
+
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        new_code = {
+            'id': next_id(codes),
+            'code': premium_code['code'],
+            'app_id': None,
+            'app_ids': premium_code['app_ids'],
+            'owner_id': target_user_id,
+            'is_active': True,
+            'created_at': now
+        }
+        codes.append(new_code)
+        save_codes(codes)
+
+        premium_code['is_used'] = True
+        premium_code['assigned_user_id'] = target_user_id
+        premium_code['assigned_at'] = now
+        save_premium_codes(premium_codes)
+
+        self.send_json({
+            'message': '分配成功',
+            'code': premium_code['code'],
+            'username': target_user['username']
+        })
+
+    def handle_delete_premium_code(self, code_id):
+        user = self.get_current_user()
+        if not user or not user['is_super_admin']:
+            self.send_error_json('需要超级管理员权限', 403)
+            return
+
+        premium_codes = get_premium_codes()
+        found = False
+        for pc in premium_codes:
+            if pc['id'] == code_id:
+                pc['is_active'] = False
+                found = True
+                break
+
+        if not found:
+            self.send_error_json('豹子号不存在', 404)
+            return
+
+        save_premium_codes(premium_codes)
+        self.send_json({'message': '删除成功'})
 
     def handle_toggle_admin(self, user_id):
         current = self.get_current_user()
