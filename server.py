@@ -70,8 +70,11 @@ SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "admin123456")
 MAX_APPS_PER_USER = 100
 MAX_APPS_PER_CODE = 10
 MAX_CODES_TO_MERGE = 10
+MAX_CODES_PER_USER = 10
 CODE_LENGTH = 4
 CODE_CHARS = "0123456789ABCDEF"
+
+ip_rate_limit = {}
 
 
 def hash_password(password: str) -> str:
@@ -87,6 +90,22 @@ def verify_password(password: str, hashed: str) -> bool:
         return hmac.compare_digest(test_hash, hash_val)
     except:
         return False
+
+
+def check_ip_rate_limit(ip):
+    now = time.time()
+    if ip not in ip_rate_limit:
+        ip_rate_limit[ip] = []
+    ip_rate_limit[ip] = [t for t in ip_rate_limit[ip] if now - t < 30]
+    if len(ip_rate_limit[ip]) >= 2:
+        return False
+    ip_rate_limit[ip].append(now)
+    return True
+
+
+def get_user_active_code_count(user_id):
+    codes = get_codes()
+    return sum(1 for c in codes if c['owner_id'] == user_id and c.get('is_active', True))
 
 
 def create_token(user_id: int) -> str:
@@ -142,106 +161,88 @@ def parse_apk_info(file_path):
 
     apk = None
     try:
-        apk = APK(file_path)
-        apk.parse_dex()
+        apk = APK.from_file(file_path)
+        apk.parse_resource()
 
-        manifest = apk.get_manifest()
-
-        if 'package' in manifest:
-            info['package_name'] = manifest['package']
-
-        if 'versionName' in manifest:
-            info['version_name'] = manifest['versionName']
-
-        if 'versionCode' in manifest:
-            info['version_code'] = int(manifest['versionCode'])
-
-        app_name = ''
-        app_icon_name = None
-
-        if 'application' in manifest:
-            app = manifest['application']
-            if 'label' in app:
-                label = str(app['label'])
-                if not label.startswith('@'):
-                    app_name = label
-            if 'icon' in app:
-                app_icon_name = str(app['icon'])
-
-        try:
-            res = apk.parse_resource()
-            if res:
-                if 'strings' in res and (app_name == '' or app_name.startswith('@')):
-                    strings = res['strings']
-                    if strings and isinstance(strings, dict):
-                        if app_name.startswith('@'):
-                            res_id = app_name[1:]
-                            if res_id in strings:
-                                app_name = str(strings[res_id])
-                        if app_name == '' or app_name.startswith('@'):
-                            for key, value in strings.items():
-                                if isinstance(value, str) and len(value) > 0 and len(value) < 50:
-                                    if not value.startswith('@') and not value.startswith('res/'):
-                                        app_name = value
-                                        break
-        except Exception as e:
-            print(f"解析资源获取应用名失败: {e}")
-
-        if app_name.startswith('@') or app_name == '':
+        info['package_name'] = apk.get_package_name() or ''
+        info['version_name'] = apk.version_name or ''
+        if hasattr(apk, '_version_code') and apk._version_code:
             try:
-                app_info = apk.get_manifest_application()
-                if app_info and 'label' in app_info:
-                    label = str(app_info['label'])
-                    if not label.startswith('@'):
-                        app_name = label
+                info['version_code'] = int(apk._version_code)
             except:
                 pass
 
-        info['app_name'] = app_name if app_name and not app_name.startswith('@') else ''
+        if hasattr(apk, '_app_name') and apk._app_name:
+            app_name = str(apk._app_name)
+            if not app_name.startswith('@') and not app_name.startswith('0x'):
+                info['app_name'] = app_name
+
+        if not info['app_name']:
+            try:
+                manifest = apk.get_manifest()
+                if manifest:
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(manifest)
+                    app_tag = root.find('application')
+                    if app_tag is not None:
+                        label = app_tag.get('{http://schemas.android.com/apk/res/android}label')
+                        if label and not label.startswith('@'):
+                            info['app_name'] = str(label)
+            except:
+                pass
 
         try:
             icons = apk.get_app_icons()
             if icons:
-                if isinstance(icons, dict):
-                    for size_key, icon_data in icons.items():
-                        if icon_data:
+                if isinstance(icons, list):
+                    for icon_data in reversed(icons):
+                        if icon_data and isinstance(icon_data, bytes) and len(icon_data) > 0:
                             info['icon_data'] = icon_data
                             break
-                elif isinstance(icons, list) and len(icons) > 0:
-                    info['icon_data'] = icons[-1] if isinstance(icons[-1], bytes) else None
                 elif isinstance(icons, bytes):
                     info['icon_data'] = icons
-        except Exception as e:
-            print(f"获取应用图标失败: {e}")
+                elif isinstance(icons, dict):
+                    for key, icon_data in icons.items():
+                        if icon_data and isinstance(icon_data, bytes) and len(icon_data) > 0:
+                            info['icon_data'] = icon_data
+                            break
+        except:
+            pass
 
-        if not info['icon_data'] and app_icon_name and app_icon_name.startswith('@'):
+        if not info['icon_data']:
             try:
-                icon_name = app_icon_name.split('/')[-1] if '/' in app_icon_name else app_icon_name[1:]
-                mipmap_dirs = ['mipmap-xxxhdpi', 'mipmap-xxhdpi', 'mipmap-xhdpi', 'mipmap-hdpi', 'mipmap-mdpi']
-                drawable_dirs = ['drawable-xxxhdpi', 'drawable-xxhdpi', 'drawable-xhdpi', 'drawable-hdpi', 'drawable-mdpi']
-                all_dirs = mipmap_dirs + drawable_dirs
-                
                 subfiles = apk.get_subfiles()
-                for dir_name in all_dirs:
-                    found = False
-                    for entry in subfiles:
-                        entry_str = entry if isinstance(entry, str) else entry.get('name', '')
-                        if dir_name in entry_str and icon_name in entry_str:
-                            try:
-                                icon_data = apk.get_file(entry_str)
-                                if icon_data and len(icon_data) > 0:
-                                    info['icon_data'] = icon_data
-                                    found = True
-                                    break
-                            except:
-                                continue
+                icon_patterns = [
+                    'mipmap-xxxhdpi-v4/', 'mipmap-xxhdpi-v4/', 'mipmap-xhdpi-v4/',
+                    'mipmap-hdpi-v4/', 'mipmap-mdpi-v4/',
+                    'drawable-xxxhdpi-v4/', 'drawable-xxhdpi-v4/', 'drawable-xhdpi-v4/',
+                    'drawable-hdpi-v4/', 'drawable-mdpi-v4/',
+                    'mipmap-xxxhdpi/', 'mipmap-xxhdpi/', 'mipmap-xhdpi/',
+                    'mipmap-hdpi/', 'mipmap-mdpi/',
+                ]
+                found = False
+                for pattern in icon_patterns:
                     if found:
                         break
-            except Exception as e:
-                print(f"从APK文件中提取图标失败: {e}")
+                    for entry in subfiles:
+                        entry_str = entry if isinstance(entry, str) else entry.get('name', '')
+                        if pattern in entry_str and ('ic_launcher' in entry_str or 'app_icon' in entry_str or 'icon' in entry_str.lower()):
+                            if entry_str.endswith('.png') or entry_str.endswith('.webp') or entry_str.endswith('.jpg'):
+                                try:
+                                    icon_data = apk.afile.read(entry_str)
+                                    if icon_data and len(icon_data) > 0:
+                                        info['icon_data'] = icon_data
+                                        found = True
+                                        break
+                                except:
+                                    continue
+            except:
+                pass
 
     except Exception as e:
         print(f"APK解析错误: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         if apk:
             try:
@@ -764,10 +765,12 @@ class Handler(BaseHTTPRequestHandler):
             if not user or not user['is_super_admin']:
                 self.send_error_json('需要超级管理员权限', 403)
                 return
+            all_codes = get_codes()
+            active_codes = [c for c in all_codes if c.get('is_active', True)]
             self.send_json({
                 'user_count': len(get_users()),
                 'app_count': len(get_apps()),
-                'code_count': len(get_codes()),
+                'code_count': len(active_codes),
                 'invite_code_count': len(get_invites()),
                 'unused_invite_codes': sum(1 for c in get_invites() if not c['is_used'])
             })
@@ -1143,6 +1146,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json('未授权', 401)
             return
 
+        client_ip = self.client_address[0]
+        if not check_ip_rate_limit(client_ip):
+            self.send_error_json('操作过于频繁，请30秒后再试', 429)
+            return
+
+        if get_user_active_code_count(user['id']) >= MAX_CODES_PER_USER:
+            self.send_error_json(f'每人最多{MAX_CODES_PER_USER}个口令，请先删除部分口令', 400)
+            return
+
         apps = get_apps()
         app = None
         for a in apps:
@@ -1180,6 +1192,11 @@ class Handler(BaseHTTPRequestHandler):
         user = self.get_current_user()
         if not user:
             self.send_error_json('未授权', 401)
+            return
+
+        client_ip = self.client_address[0]
+        if not check_ip_rate_limit(client_ip):
+            self.send_error_json('操作过于频繁，请30秒后再试', 429)
             return
 
         body = self.parse_json_body()
@@ -1269,6 +1286,15 @@ class Handler(BaseHTTPRequestHandler):
         user = self.get_current_user()
         if not user:
             self.send_error_json('未授权', 401)
+            return
+
+        client_ip = self.client_address[0]
+        if not check_ip_rate_limit(client_ip):
+            self.send_error_json('操作过于频繁，请30秒后再试', 429)
+            return
+
+        if get_user_active_code_count(user['id']) >= MAX_CODES_PER_USER:
+            self.send_error_json(f'每人最多{MAX_CODES_PER_USER}个口令，请先删除部分口令', 400)
             return
 
         body = self.parse_json_body()
