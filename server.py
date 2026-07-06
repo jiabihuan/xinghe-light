@@ -140,8 +140,11 @@ def parse_apk_info(file_path):
     if not HAS_APKUTILS:
         return info
 
+    apk = None
     try:
         apk = APK(file_path)
+        apk.parse_dex()
+
         manifest = apk.get_manifest()
 
         if 'package' in manifest:
@@ -154,56 +157,97 @@ def parse_apk_info(file_path):
             info['version_code'] = int(manifest['versionCode'])
 
         app_name = ''
+        app_icon_name = None
+
         if 'application' in manifest:
             app = manifest['application']
             if 'label' in app:
-                app_name = str(app['label'])
-            elif app_name == '' and 'meta-data' in app:
-                for md in app['meta-data']:
-                    if md.get('name') == 'com.google.android.gms.appinvite.APP_NAME':
-                        app_name = md.get('value', '')
-                        break
-
-        if app_name == '' or app_name.startswith('@'):
-            res = apk.get_resource()
-            if res is not None:
-                try:
-                    strings = res.get_strings()
-                    if strings:
-                        app_name = list(strings.values())[0] if strings else ''
-                except:
-                    pass
-
-        info['app_name'] = app_name if app_name else ''
-
-        icon_path = None
-        if 'application' in manifest:
-            app = manifest['application']
+                label = str(app['label'])
+                if not label.startswith('@'):
+                    app_name = label
             if 'icon' in app:
-                icon_path = str(app['icon'])
+                app_icon_name = str(app['icon'])
 
-        if icon_path and icon_path.startswith('@'):
+        try:
+            res = apk.parse_resource()
+            if res:
+                if 'strings' in res and (app_name == '' or app_name.startswith('@')):
+                    strings = res['strings']
+                    if strings and isinstance(strings, dict):
+                        if app_name.startswith('@'):
+                            res_id = app_name[1:]
+                            if res_id in strings:
+                                app_name = str(strings[res_id])
+                        if app_name == '' or app_name.startswith('@'):
+                            for key, value in strings.items():
+                                if isinstance(value, str) and len(value) > 0 and len(value) < 50:
+                                    if not value.startswith('@') and not value.startswith('res/'):
+                                        app_name = value
+                                        break
+        except Exception as e:
+            print(f"解析资源获取应用名失败: {e}")
+
+        if app_name.startswith('@') or app_name == '':
             try:
-                res = apk.get_resource()
-                if res is not None:
-                    mipmap_dirs = ['mipmap-hdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi']
-                    drawable_dirs = ['drawable-hdpi', 'drawable-xhdpi', 'drawable-xxhdpi', 'drawable-xxxhdpi']
-                    all_dirs = mipmap_dirs + drawable_dirs
-                    icon_name = icon_path[1:]
-                    for dir_name in all_dirs:
-                        for entry in apk.get_files():
-                            if dir_name in entry and icon_name in entry:
-                                icon_data = apk.get_file(entry)
-                                if icon_data:
-                                    info['icon_data'] = icon_data
-                                    break
-                        if info['icon_data']:
-                            break
+                app_info = apk.get_manifest_application()
+                if app_info and 'label' in app_info:
+                    label = str(app_info['label'])
+                    if not label.startswith('@'):
+                        app_name = label
             except:
                 pass
 
+        info['app_name'] = app_name if app_name and not app_name.startswith('@') else ''
+
+        try:
+            icons = apk.get_app_icons()
+            if icons:
+                if isinstance(icons, dict):
+                    for size_key, icon_data in icons.items():
+                        if icon_data:
+                            info['icon_data'] = icon_data
+                            break
+                elif isinstance(icons, list) and len(icons) > 0:
+                    info['icon_data'] = icons[-1] if isinstance(icons[-1], bytes) else None
+                elif isinstance(icons, bytes):
+                    info['icon_data'] = icons
+        except Exception as e:
+            print(f"获取应用图标失败: {e}")
+
+        if not info['icon_data'] and app_icon_name and app_icon_name.startswith('@'):
+            try:
+                icon_name = app_icon_name.split('/')[-1] if '/' in app_icon_name else app_icon_name[1:]
+                mipmap_dirs = ['mipmap-xxxhdpi', 'mipmap-xxhdpi', 'mipmap-xhdpi', 'mipmap-hdpi', 'mipmap-mdpi']
+                drawable_dirs = ['drawable-xxxhdpi', 'drawable-xxhdpi', 'drawable-xhdpi', 'drawable-hdpi', 'drawable-mdpi']
+                all_dirs = mipmap_dirs + drawable_dirs
+                
+                subfiles = apk.get_subfiles()
+                for dir_name in all_dirs:
+                    found = False
+                    for entry in subfiles:
+                        entry_str = entry if isinstance(entry, str) else entry.get('name', '')
+                        if dir_name in entry_str and icon_name in entry_str:
+                            try:
+                                icon_data = apk.get_file(entry_str)
+                                if icon_data and len(icon_data) > 0:
+                                    info['icon_data'] = icon_data
+                                    found = True
+                                    break
+                            except:
+                                continue
+                    if found:
+                        break
+            except Exception as e:
+                print(f"从APK文件中提取图标失败: {e}")
+
     except Exception as e:
         print(f"APK解析错误: {e}")
+    finally:
+        if apk:
+            try:
+                apk.close()
+            except:
+                pass
 
     return info
 
