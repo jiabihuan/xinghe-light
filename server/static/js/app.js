@@ -330,6 +330,9 @@ document.getElementById('btn-upload').addEventListener('click', () => {
     document.getElementById('upload-file').value = '';
     document.getElementById('file-name').textContent = '';
     document.getElementById('apk-preview').classList.add('hidden');
+    document.getElementById('upload-progress').classList.add('hidden');
+    document.getElementById('progress-fill').style.width = '0%';
+    document.getElementById('progress-text').textContent = '正在上传... 0%';
 });
 
 document.getElementById('upload-area').addEventListener('click', () => {
@@ -343,7 +346,7 @@ document.getElementById('upload-file').addEventListener('change', (e) => {
     }
 });
 
-document.getElementById('btn-upload-confirm').addEventListener('click', async () => {
+document.getElementById('btn-upload-confirm').addEventListener('click', () => {
     const fileInput = document.getElementById('upload-file');
     const appName = document.getElementById('upload-app-name').value.trim();
     const categoryId = document.getElementById('upload-category').value;
@@ -357,6 +360,13 @@ document.getElementById('btn-upload-confirm').addEventListener('click', async ()
     btn.disabled = true;
     btn.textContent = '上传中...';
 
+    const progressDiv = document.getElementById('upload-progress');
+    const progressFill = document.getElementById('progress-fill');
+    const progressText = document.getElementById('progress-text');
+    progressDiv.classList.remove('hidden');
+    progressFill.style.width = '0%';
+    progressText.textContent = '正在上传... 0%';
+
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
     if (appName) {
@@ -366,20 +376,48 @@ document.getElementById('btn-upload-confirm').addEventListener('click', async ()
         formData.append('category_id', categoryId);
     }
 
-    try {
-        const res = await api('/apps/upload', {
-            method: 'POST',
-            body: formData
-        });
-        showToast('上传成功', 'success');
-        closeModal('upload-modal');
-        loadApps();
-    } catch (err) {
-        showToast(err.message, 'error');
-    } finally {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API}/apps/upload`);
+    if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+
+    xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            progressFill.style.width = percent + '%';
+            progressText.textContent = `正在上传... ${percent}%`;
+        }
+    };
+
+    xhr.onload = () => {
+        try {
+            const data = JSON.parse(xhr.responseText);
+            if (xhr.status >= 200 && xhr.status < 300) {
+                progressText.textContent = '上传完成，正在处理...';
+                showToast('上传成功', 'success');
+                setTimeout(() => {
+                    closeModal('upload-modal');
+                    loadApps();
+                }, 500);
+            } else {
+                showToast(data.detail || '上传失败', 'error');
+            }
+        } catch (e) {
+            showToast('上传失败', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '上传';
+        }
+    };
+
+    xhr.onerror = () => {
+        showToast('网络错误，上传失败', 'error');
         btn.disabled = false;
         btn.textContent = '上传';
-    }
+    };
+
+    xhr.send(formData);
 });
 
 async function loadCodes() {
