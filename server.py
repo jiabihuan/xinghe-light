@@ -318,6 +318,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_file(TEMPLATE_DIR / 'index.html', 'text/html; charset=utf-8')
             return
 
+        if path.startswith('/api/download/'):
+            code_str = path[len('/api/download/'):]
+            self.handle_download(code_str)
+            return
+
+        if path.startswith('/api/'):
+            self.handle_api_get(path, parsed)
+            return
+
         if path.startswith('/static/'):
             rel = path[len('/static/'):]
             filepath = STATIC_DIR / rel
@@ -325,15 +334,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_file(filepath)
             else:
                 self.send_error_json('Not Found', 404)
-            return
-
-        if path.startswith('/api/'):
-            self.handle_api_get(path, parsed)
-            return
-
-        if path.startswith('/api/download/'):
-            code_str = path[len('/api/download/'):]
-            self.handle_download(code_str)
             return
 
         self.send_error_json('Not Found', 404)
@@ -898,9 +898,16 @@ class Handler(BaseHTTPRequestHandler):
         save_apps(apps)
 
         filename = f"{target_app['name']}_{target_app['version_name']}.apk"
+        try:
+            filename.encode('latin-1')
+            disposition = f'attachment; filename="{filename}"'
+        except UnicodeEncodeError:
+            import urllib.parse
+            encoded_name = urllib.parse.quote(filename)
+            disposition = f"attachment; filename*=UTF-8''{encoded_name}"
         self.send_response(200)
         self.send_header('Content-Type', 'application/vnd.android.package-archive')
-        self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        self.send_header('Content-Disposition', disposition)
         self.send_header('Content-Length', str(target_app['apk_size']))
         self.end_headers()
         with open(apk_path, 'rb') as f:
