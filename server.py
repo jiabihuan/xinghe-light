@@ -14,10 +14,16 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import re
 
 try:
-    from apkutils import APK
+    from apkutils import APK as ApkUtilsAPK
     HAS_APKUTILS = True
 except ImportError:
     HAS_APKUTILS = False
+
+try:
+    from apk_info import APK
+    HAS_APK_INFO = True
+except ImportError:
+    HAS_APK_INFO = False
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -156,12 +162,77 @@ def parse_apk_info(file_path):
         'version_code': 1,
         'icon_data': None
     }
+
+    if HAS_APK_INFO:
+        try:
+            apk = APK(str(file_path))
+
+            info['package_name'] = apk.get_package_name() or ''
+            info['version_name'] = apk.get_version_name() or ''
+            try:
+                vc = apk.get_version_code()
+                if vc:
+                    info['version_code'] = int(vc)
+            except:
+                pass
+
+            try:
+                label = apk.get_application_label()
+                if label and isinstance(label, str) and len(label) > 0 and not label.startswith('@') and not label.startswith('0x'):
+                    info['app_name'] = label
+            except:
+                pass
+
+            try:
+                icon_res = apk.get_application_icon()
+                if icon_res and isinstance(icon_res, str) and len(icon_res) > 0:
+                    icon_data = apk.read(icon_res)
+                    if icon_data and len(icon_data) > 0:
+                        info['icon_data'] = icon_data
+            except:
+                pass
+
+            if not info['icon_data']:
+                try:
+                    namelist = apk.namelist()
+                    icon_patterns = [
+                        'res/mipmap-xxxhdpi-v4/', 'res/mipmap-xxhdpi-v4/', 'res/mipmap-xhdpi-v4/',
+                        'res/mipmap-hdpi-v4/', 'res/mipmap-mdpi-v4/',
+                        'res/drawable-xxxhdpi-v4/', 'res/drawable-xxhdpi-v4/', 'res/drawable-xhdpi-v4/',
+                        'res/drawable-hdpi-v4/', 'res/drawable-mdpi-v4/',
+                        'res/mipmap-xxxhdpi/', 'res/mipmap-xxhdpi/', 'res/mipmap-xhdpi/',
+                        'res/mipmap-hdpi/', 'res/mipmap-mdpi/',
+                    ]
+                    found = False
+                    for pattern in icon_patterns:
+                        if found:
+                            break
+                        for entry in namelist:
+                            if pattern in entry and ('ic_launcher' in entry or 'app_icon' in entry or 'icon' in entry.lower()):
+                                if entry.endswith('.png') or entry.endswith('.webp') or entry.endswith('.jpg'):
+                                    try:
+                                        icon_data = apk.read(entry)
+                                        if icon_data and len(icon_data) > 0:
+                                            info['icon_data'] = icon_data
+                                            found = True
+                                            break
+                                    except:
+                                        continue
+                except:
+                    pass
+
+            return info
+        except Exception as e:
+            print(f"apk-info解析错误: {e}")
+            import traceback
+            traceback.print_exc()
+
     if not HAS_APKUTILS:
         return info
 
     apk = None
     try:
-        apk = APK.from_file(file_path)
+        apk = ApkUtilsAPK.from_file(file_path)
         apk.parse_resource()
 
         info['package_name'] = apk.get_package_name() or ''
@@ -240,7 +311,7 @@ def parse_apk_info(file_path):
                 pass
 
     except Exception as e:
-        print(f"APK解析错误: {e}")
+        print(f"apkutils解析错误: {e}")
         import traceback
         traceback.print_exc()
     finally:
