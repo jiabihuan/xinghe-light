@@ -28,6 +28,7 @@ USERS_FILE = DATA_DIR / "users.json"
 APPS_FILE = DATA_DIR / "apps.json"
 CODES_FILE = DATA_DIR / "codes.json"
 INVITES_FILE = DATA_DIR / "invites.json"
+CATEGORIES_FILE = DATA_DIR / "categories.json"
 
 
 def load_json(filepath, default):
@@ -147,6 +148,21 @@ def get_invites():
 
 def save_invites(invites):
     save_json(INVITES_FILE, invites)
+
+
+def get_categories():
+    return load_json(CATEGORIES_FILE, [])
+
+
+def save_categories(categories):
+    save_json(CATEGORIES_FILE, categories)
+
+
+def get_category_by_id(cat_id):
+    for c in get_categories():
+        if c['id'] == cat_id:
+            return c
+    return None
 
 
 def parse_multipart(content_type, body):
@@ -867,13 +883,33 @@ class Handler(BaseHTTPRequestHandler):
         save_codes(codes)
         self.send_json({'message': '口令已删除'})
 
-    def handle_download(self, code_str):
+    def handle_download(self, path_suffix):
+        parts = path_suffix.rstrip('/').split('/')
+        code_str = parts[0] if len(parts) > 0 else ''
+        app_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+
         code_obj = get_code_by_code(code_str)
         if not code_obj:
             self.send_error_json('口令无效', 404)
             return
 
-        app = get_app_by_id(code_obj['app_id'])
+        app_ids = code_obj.get('app_ids', [])
+        if not app_ids and code_obj.get('app_id'):
+            app_ids = [code_obj['app_id']]
+
+        if not app_ids:
+            self.send_error_json('口令无效', 404)
+            return
+
+        if app_id:
+            if app_id not in app_ids:
+                self.send_error_json('应用不在口令中', 404)
+                return
+            target_app_id = app_id
+        else:
+            target_app_id = app_ids[0]
+
+        app = get_app_by_id(target_app_id)
         if not app:
             self.send_error_json('应用不存在', 404)
             return
@@ -945,31 +981,68 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json('口令无效', 404)
             return
 
-        app = get_app_by_id(code_obj['app_id'])
-        if not app:
-            self.send_error_json('应用不存在', 404)
+        app_ids = code_obj.get('app_ids', [])
+        if not app_ids and code_obj.get('app_id'):
+            app_ids = [code_obj['app_id']]
+
+        if not app_ids:
+            self.send_error_json('口令无效', 404)
             return
 
-        target_app = app
-        if app['is_duplicate'] and app.get('real_app_id'):
-            real = get_app_by_id(app['real_app_id'])
-            if real:
-                target_app = real
-
-        self.send_json({
-            'type': 'single',
-            'app': {
+        apps = []
+        for aid in app_ids:
+            app = get_app_by_id(aid)
+            if not app:
+                continue
+            target_app = app
+            if app['is_duplicate'] and app.get('real_app_id'):
+                real = get_app_by_id(app['real_app_id'])
+                if real:
+                    target_app = real
+            cat_id = target_app.get('category_id', 0)
+            cat_name = ''
+            if cat_id:
+                cat = get_category_by_id(cat_id)
+                if cat:
+                    cat_name = cat.get('name', '')
+            apps.append({
                 'id': target_app['id'],
                 'name': target_app['name'],
                 'package_name': target_app['package_name'],
                 'version_name': target_app['version_name'],
                 'version_code': 1,
                 'apk_size': target_app['apk_size'],
-                'download_url': f'/api/download/{code_str}',
+                'download_url': f'/api/download/{code_str}/{target_app["id"]}',
                 'description': target_app.get('description', ''),
-                'download_count': target_app['download_count']
-            }
-        })
+                'download_count': target_app['download_count'],
+                'category_id': cat_id,
+                'category_name': cat_name,
+                'icon_url': target_app.get('icon_url', '')
+            })
+
+        if not apps:
+            self.send_error_json('应用不存在', 404)
+            return
+
+        categories = []
+        seen_cats = set()
+        for a in apps:
+            cid = a['category_id']
+            if cid and cid not in seen_cats:
+                seen_cats.add(cid)
+                categories.append({'id': cid, 'name': a['category_name']})
+
+        if len(apps) == 1 and not categories:
+            self.send_json({
+                'type': 'single',
+                'app': apps[0]
+            })
+        else:
+            self.send_json({
+                'type': 'multi',
+                'categories': categories,
+                'apps': apps
+            })
 
     def handle_toggle_admin(self, user_id):
         current = self.get_current_user()
