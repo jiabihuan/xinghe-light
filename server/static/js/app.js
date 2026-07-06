@@ -120,7 +120,6 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 });
 
 async function enterApp() {
-    showPage('main-page');
     try {
         currentUser = await api('/auth/me');
     } catch {
@@ -130,6 +129,7 @@ async function enterApp() {
         return;
     }
 
+    showPage('main-page');
     document.getElementById('user-name').textContent = currentUser.username;
     if (currentUser.is_super_admin) {
         document.getElementById('user-role').textContent = '超级管理员';

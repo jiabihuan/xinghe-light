@@ -29,7 +29,14 @@ APPS_FILE = DATA_DIR / "apps.json"
 CODES_FILE = DATA_DIR / "codes.json"
 INVITES_FILE = DATA_DIR / "invites.json"
 
-SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))
+def load_secret_key():
+    config = load_json(CONFIG_FILE, {})
+    if 'secret_key' not in config:
+        config['secret_key'] = secrets.token_hex(32)
+        save_json(CONFIG_FILE, config)
+    return config['secret_key']
+
+SECRET_KEY = os.getenv("SECRET_KEY", load_secret_key())
 SUPER_ADMIN_USERNAME = os.getenv("SUPER_ADMIN_USERNAME", "admin")
 SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "admin123456")
 MAX_APPS_PER_USER = 100
