@@ -79,6 +79,7 @@ MAX_CODES_TO_MERGE = 10
 MAX_CODES_PER_USER = 10
 CODE_LENGTH = 4
 CODE_CHARS = "0123456789ABCDEF"
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024
 
 ip_rate_limit = {}
 
@@ -1105,7 +1106,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length) if length > 0 else b''
+            print(f"[UPLOAD] 用户 {user['username']} 开始上传，Content-Length: {length} bytes ({format_size(length)})")
+
+            if length > MAX_UPLOAD_SIZE:
+                print(f"[UPLOAD] 文件大小超限: {format_size(length)} > {format_size(MAX_UPLOAD_SIZE)}")
+                self.send_error_json(f'文件大小不能超过{format_size(MAX_UPLOAD_SIZE)}', 413)
+                return
+
+            if length == 0:
+                self.send_error_json('文件不能为空', 400)
+                return
+
+            body = self.rfile.read(length)
+            print(f"[UPLOAD] 读取完成，实际读取: {len(body)} bytes")
             form = parse_multipart(content_type, body)
 
             if 'file' not in form or not isinstance(form['file'], dict):
@@ -1124,17 +1137,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             apk_size = len(file_data)
-            file_id = str(uuid.uuid4())
-            save_name = f"{file_id}.apk"
-            save_path = APK_DIR / save_name
+            temp_path = APK_DIR / f"temp_{uuid.uuid4().hex}.apk"
 
-            with open(save_path, 'wb') as f:
+            with open(temp_path, 'wb') as f:
                 f.write(file_data)
 
             try:
-                apk_info = parse_apk_info(str(save_path))
+                apk_info = parse_apk_info(str(temp_path))
             except Exception as e:
                 print(f"[UPLOAD] parse_apk_info error: {e}")
+                try:
+                    temp_path.unlink()
+                except:
+                    pass
                 apk_info = {
                     'app_name': '',
                     'package_name': '',
@@ -1148,6 +1163,114 @@ class Handler(BaseHTTPRequestHandler):
                 app_name = filename.rsplit('.', 1)[0]
             package_name = apk_info['package_name'] if apk_info['package_name'] else f"com.uploaded.{secrets.token_hex(4)}"
             version_name = apk_info['version_name'] if apk_info['version_name'] else "1.0"
+            version_code = apk_info.get('version_code', 1)
+
+            print(f"[UPLOAD] 解析完成 - 包名: {package_name}, 版本: {version_name} (version_code: {version_code})")
+
+            existing_app = None
+            for a in apps:
+                if a['package_name'] == package_name and a.get('version_code', 1) == version_code and not a.get('is_duplicate', False):
+                    existing_app = a
+                    break
+
+            if existing_app:
+                print(f"[UPLOAD] 发现重复应用: {existing_app['name']} (ID: {existing_app['id']})")
+                try:
+                    temp_path.unlink()
+                except:
+                    pass
+
+                category_id = 0
+                cat_str = form.get('category_id')
+                if cat_str and str(cat_str).isdigit():
+                    category_id = int(cat_str)
+
+                now = time.strftime('%Y-%m-%d %H:%M:%S')
+                app_id = next_id(apps)
+                icon_url = existing_app.get('icon_url', '')
+
+                app = {
+                    'id': app_id,
+                    'name': existing_app['name'],
+                    'package_name': package_name,
+                    'version_name': version_name,
+                    'version_code': version_code,
+                    'apk_path': existing_app['apk_path'],
+                    'apk_size': existing_app['apk_size'],
+                    'description': '',
+                    'owner_id': user['id'],
+                    'real_app_id': existing_app['id'],
+                    'is_duplicate': True,
+                    'download_count': 0,
+                    'category_id': existing_app.get('category_id', category_id),
+                    'icon_url': icon_url,
+                    'created_at': now
+                }
+                apps.append(app)
+                save_apps(apps)
+
+                codes = get_codes()
+                code_id = next_id(codes)
+                code_str = None
+                for _ in range(100):
+                    code_str = generate_code()
+                    if not any(c['code'] == code_str for c in codes):
+                        break
+                else:
+                    code_str = None
+
+                if not code_str:
+                    self.send_error_json('生成口令失败，请重试', 500)
+                    return
+
+                code = {
+                    'id': code_id,
+                    'code': code_str,
+                    'app_id': app_id,
+                    'app_ids': [],
+                    'owner_id': user['id'],
+                    'is_active': True,
+                    'created_at': now
+                }
+                codes.append(code)
+                save_codes(codes)
+
+                categories = get_categories()
+                cat_map = {c['id']: c for c in categories}
+                cat_name = cat_map.get(app['category_id'], {}).get('name', '')
+
+                self.send_json({
+                    'id': app['id'],
+                    'name': app['name'],
+                    'package_name': app['package_name'],
+                    'version_name': app['version_name'],
+                    'apk_size': app['apk_size'],
+                    'apk_size_str': format_size(app['apk_size']),
+                    'is_duplicate': True,
+                    'download_count': app['download_count'],
+                    'category_id': app['category_id'],
+                    'category_name': cat_name,
+                    'icon_url': icon_url,
+                    'created_at': app['created_at'],
+                    'codes': [code_str],
+                    'code': code_str,
+                    'code_id': code['id']
+                })
+                return
+
+            print(f"[UPLOAD] 新应用，保存文件...")
+            safe_pkg = package_name.replace('/', '_').replace('\\', '_')
+            save_name = f"{safe_pkg}_v{version_name}_{version_code}.apk"
+            save_path = APK_DIR / save_name
+
+            counter = 1
+            while save_path.exists():
+                save_name = f"{safe_pkg}_v{version_name}_{version_code}_{counter}.apk"
+                save_path = APK_DIR / save_name
+                counter += 1
+
+            temp_path.rename(save_path)
+            print(f"[UPLOAD] 文件已保存为: {save_name}")
 
             icon_url = ''
             if apk_info.get('icon_data'):
@@ -1171,7 +1294,7 @@ class Handler(BaseHTTPRequestHandler):
                 'name': app_name,
                 'package_name': package_name,
                 'version_name': version_name,
-                'version_code': apk_info.get('version_code', 1),
+                'version_code': version_code,
                 'apk_path': str(save_path),
                 'apk_size': apk_size,
                 'description': '',
@@ -1655,14 +1778,14 @@ class Handler(BaseHTTPRequestHandler):
                 except:
                     pass
 
-        if app.get('icon_url'):
-            icon_name = app['icon_url'].split('/')[-1]
-            icon_path = ICON_DIR / icon_name
-            if icon_path.exists():
-                try:
-                    icon_path.unlink()
-                except:
-                    pass
+            if app.get('icon_url'):
+                icon_name = app['icon_url'].split('/')[-1]
+                icon_path = ICON_DIR / icon_name
+                if icon_path.exists():
+                    try:
+                        icon_path.unlink()
+                    except:
+                        pass
 
         apps = [a for a in apps if a['id'] != app_id]
         save_apps(apps)

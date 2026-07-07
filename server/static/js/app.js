@@ -339,10 +339,15 @@ document.getElementById('upload-area').addEventListener('click', () => {
     document.getElementById('upload-file').click();
 });
 
+const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
+
 document.getElementById('upload-file').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) {
         document.getElementById('file-name').textContent = file.name;
+        if (file.size > MAX_UPLOAD_SIZE) {
+            showToast(`文件大小不能超过${formatSize(MAX_UPLOAD_SIZE)}，当前文件${formatSize(file.size)}`, 'error');
+        }
     }
 });
 
@@ -353,6 +358,12 @@ document.getElementById('btn-upload-confirm').addEventListener('click', () => {
 
     if (!fileInput.files || fileInput.files.length === 0) {
         showToast('请选择APK文件', 'error');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    if (file.size > MAX_UPLOAD_SIZE) {
+        showToast(`文件大小不能超过${formatSize(MAX_UPLOAD_SIZE)}，当前文件${formatSize(file.size)}`, 'error');
         return;
     }
 
