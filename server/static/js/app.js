@@ -420,6 +420,9 @@ document.getElementById('btn-upload-confirm').addEventListener('click', () => {
     xhr.send(formData);
 });
 
+let editingCodeId = null;
+let editingCodeAppIds = [];
+
 async function loadCodes() {
     try {
         const codes = await api('/my/codes');
@@ -437,17 +440,21 @@ async function loadCodes() {
             <div class="code-card">
                 <div class="code-card-header">
                     <div class="code-display">${code.code}</div>
-                    <button class="code-delete-btn" onclick="deleteCodeById(${code.id})">删除</button>
+                    <div style="display:flex;gap:8px">
+                        <button class="action-btn edit" onclick="openEditCodeApps(${code.id}, '${code.code}')">管理应用</button>
+                        <button class="code-delete-btn" onclick="deleteCodeById(${code.id})">删除</button>
+                    </div>
                 </div>
-                <div style="font-size:12px;color:#999;margin-bottom:8px">创建时间: ${code.created_at}</div>
+                <div style="font-size:12px;color:#999;margin-bottom:8px">${code.apps.length} 个应用 · 创建于 ${code.created_at}</div>
                 <div class="app-list">
-                    ${code.apps.map(app => `
+                    ${code.apps.slice(0, 10).map(app => `
                         <div class="app-item">
                             <span class="app-dot"></span>
                             <span>${escapeHtml(app.name)}</span>
                             ${app.category_name ? `<span style="color:#999;font-size:11px">(${escapeHtml(app.category_name)})</span>` : ''}
                         </div>
                     `).join('')}
+                    ${code.apps.length > 10 ? `<div style="font-size:12px;color:#999;padding-left:14px;margin-top:4px">还有 ${code.apps.length - 10} 个应用...</div>` : ''}
                 </div>
             </div>
         `).join('');
@@ -455,6 +462,77 @@ async function loadCodes() {
         showToast('加载口令失败', 'error');
     }
 }
+
+function openEditCodeApps(codeId, codeStr) {
+    editingCodeId = codeId;
+    document.getElementById('edit-code-display').textContent = codeStr;
+
+    api('/my/codes').then(codes => {
+        const code = codes.find(c => c.id === codeId);
+        if (!code) return;
+
+        editingCodeAppIds = [...code.app_ids];
+
+        const list = document.getElementById('edit-code-app-list');
+        list.innerHTML = apps.map(app => {
+            const selected = editingCodeAppIds.includes(app.id);
+            const iconHtml = app.icon_url ?
+                `<img src="${app.icon_url}" alt="${escapeHtml(app.name)}">` :
+                escapeHtml(app.name.charAt(0));
+            return `
+                <div class="select-item ${selected ? 'selected' : ''}" onclick="toggleEditCodeApp(${app.id}, this)">
+                    <div class="select-checkbox"></div>
+                    <div class="select-item-icon">${iconHtml}</div>
+                    <div class="select-item-info">
+                        <div class="select-item-name">${escapeHtml(app.name)}</div>
+                        <div class="select-item-desc">${escapeHtml(app.package_name)}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        document.getElementById('edit-code-count').textContent = editingCodeAppIds.length;
+        document.getElementById('edit-code-apps-modal').classList.remove('hidden');
+    }).catch(err => {
+        showToast(err.message, 'error');
+    });
+}
+
+function toggleEditCodeApp(appId, el) {
+    const idx = editingCodeAppIds.indexOf(appId);
+    if (idx > -1) {
+        editingCodeAppIds.splice(idx, 1);
+        el.classList.remove('selected');
+    } else {
+        if (editingCodeAppIds.length >= 100) {
+            showToast('最多100个应用', 'error');
+            return;
+        }
+        editingCodeAppIds.push(appId);
+        el.classList.add('selected');
+    }
+    document.getElementById('edit-code-count').textContent = editingCodeAppIds.length;
+}
+
+document.getElementById('btn-edit-code-apps-confirm').addEventListener('click', async () => {
+    if (!editingCodeId) return;
+    if (editingCodeAppIds.length === 0) {
+        showToast('至少保留一个应用', 'error');
+        return;
+    }
+    try {
+        await api(`/codes/${editingCodeId}/apps`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ app_ids: editingCodeAppIds, action: 'replace' })
+        });
+        showToast('口令已更新', 'success');
+        closeModal('edit-code-apps-modal');
+        loadCodes();
+        loadApps();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+});
 
 async function deleteCodeById(codeId) {
     if (!confirm('确定删除此口令?')) return;
@@ -499,11 +577,11 @@ function toggleSelectApp(appId, el) {
     if (idx > -1) {
         selectedAppIds.splice(idx, 1);
         el.classList.remove('selected');
-    } else if (selectedAppIds.length < 10) {
+    } else if (selectedAppIds.length < 100) {
         selectedAppIds.push(appId);
         el.classList.add('selected');
     } else {
-        showToast('最多选择10个应用', 'error');
+        showToast('最多选择100个应用', 'error');
     }
     document.getElementById('multi-code-count').textContent = selectedAppIds.length;
 }
@@ -965,11 +1043,11 @@ function toggleSelectPremiumApp(appId, el) {
     if (idx > -1) {
         selectedPremiumAppIds.splice(idx, 1);
         el.classList.remove('selected');
-    } else if (selectedPremiumAppIds.length < 10) {
+    } else if (selectedPremiumAppIds.length < 100) {
         selectedPremiumAppIds.push(appId);
         el.classList.add('selected');
     } else {
-        showToast('最多选择10个应用', 'error');
+        showToast('最多选择100个应用', 'error');
     }
     document.getElementById('premium-app-count').textContent = selectedPremiumAppIds.length;
 }

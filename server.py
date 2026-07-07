@@ -74,7 +74,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", load_secret_key())
 SUPER_ADMIN_USERNAME = os.getenv("SUPER_ADMIN_USERNAME", "admin")
 SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "admin123456")
 MAX_APPS_PER_USER = 100
-MAX_APPS_PER_CODE = 10
+MAX_APPS_PER_CODE = 100
 MAX_CODES_TO_MERGE = 10
 MAX_CODES_PER_USER = 10
 CODE_LENGTH = 4
@@ -186,10 +186,13 @@ def parse_apk_info(file_path):
 
             try:
                 icon_path = apk.get_app_icon()
-                if icon_path:
-                    icon_data = apk.get_file(icon_path)
-                    if icon_data and len(icon_data) > 0:
-                        info['icon_data'] = icon_data
+                if icon_path and isinstance(icon_path, str):
+                    if icon_path.endswith(('.png', '.webp', '.jpg', '.jpeg')):
+                        icon_data = apk.get_file(icon_path)
+                        if icon_data and len(icon_data) > 0:
+                            basename = Path(icon_path).stem.lower()
+                            if 'foreground' not in basename and 'background' not in basename and 'monochrome' not in basename:
+                                info['icon_data'] = icon_data
             except:
                 pass
 
@@ -204,32 +207,61 @@ def parse_apk_info(file_path):
             if not info['icon_data']:
                 try:
                     files = apk.get_files()
-                    icon_patterns = [
+                    file_list = []
+                    for entry in files:
+                        entry_name = entry if isinstance(entry, str) else entry.get('name', '')
+                        if entry_name:
+                            file_list.append(entry_name)
+
+                    density_order = [
                         'mipmap-xxxhdpi-v4/', 'mipmap-xxhdpi-v4/', 'mipmap-xhdpi-v4/',
                         'mipmap-hdpi-v4/', 'mipmap-mdpi-v4/',
                         'drawable-xxxhdpi-v4/', 'drawable-xxhdpi-v4/', 'drawable-xhdpi-v4/',
                         'drawable-hdpi-v4/', 'drawable-mdpi-v4/',
                         'mipmap-xxxhdpi/', 'mipmap-xxhdpi/', 'mipmap-xhdpi/',
                         'mipmap-hdpi/', 'mipmap-mdpi/',
+                        'drawable-xxxhdpi/', 'drawable-xxhdpi/', 'drawable-xhdpi/',
+                        'drawable-hdpi/', 'drawable-mdpi/',
+                        'mipmap/', 'drawable/',
                     ]
+
+                    icon_keywords = ['ic_launcher', 'app_icon', 'launcher_icon', 'icon']
+                    exclude_keywords = ['foreground', 'background', 'monochrome', '_round', 'adaptive']
+
+                    def is_valid_icon(fname):
+                        if not fname.endswith(('.png', '.webp', '.jpg', '.jpeg')):
+                            return False
+                        basename = Path(fname).stem.lower()
+                        for ek in exclude_keywords:
+                            if ek in basename:
+                                return False
+                        return True
+
                     found = False
-                    for pattern in icon_patterns:
+                    for density in density_order:
                         if found:
                             break
-                        for entry in files:
-                            entry_name = entry if isinstance(entry, str) else entry.get('name', '')
-                            if pattern in entry_name and ('ic_launcher' in entry_name or 'app_icon' in entry_name or 'icon' in entry_name.lower()):
-                                if entry_name.endswith('.png') or entry_name.endswith('.webp') or entry_name.endswith('.jpg'):
-                                    try:
-                                        data = apk.get_file(entry_name)
-                                        if data and len(data) > 0:
-                                            info['icon_data'] = data
-                                            found = True
-                                            break
-                                    except:
-                                        continue
-                except:
-                    pass
+                        candidates = [f for f in file_list if density in f and is_valid_icon(f)]
+                        best = None
+                        for kw in icon_keywords:
+                            match = [f for f in candidates if kw in Path(f).stem.lower()]
+                            if match:
+                                match.sort(key=lambda x: len(Path(x).stem))
+                                best = match[0]
+                                break
+                        if not best and candidates:
+                            candidates.sort(key=lambda x: len(Path(x).stem))
+                            best = candidates[0]
+                        if best:
+                            try:
+                                data = apk.get_file(best)
+                                if data and len(data) > 0:
+                                    info['icon_data'] = data
+                                    found = True
+                            except:
+                                continue
+                except Exception as e:
+                    print(f"图标搜索错误: {e}")
 
             return info
         except Exception as e:
@@ -878,6 +910,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error_json('Not Found', 404)
 
     def handle_api_put(self, path, parsed):
+        if path.startswith('/api/codes/') and path.endswith('/apps'):
+            try:
+                code_id = int(path.split('/')[-2])
+                self.handle_update_code_apps(code_id)
+            except:
+                self.send_error_json('Not Found', 404)
+            return
+
         if path.startswith('/api/apps/'):
             try:
                 app_id = int(path.rsplit('/', 1)[-1])
@@ -1387,6 +1427,86 @@ class Handler(BaseHTTPRequestHandler):
             'app_ids': app_ids,
             'apps': merged_apps,
             'message': f'成功创建口令，包含{len(app_ids)}个应用'
+        })
+
+    def handle_update_code_apps(self, code_id):
+        user = self.get_current_user()
+        if not user:
+            self.send_error_json('未授权', 401)
+            return
+
+        body = self.parse_json_body()
+        app_ids = body.get('app_ids', [])
+        action = body.get('action', 'replace')
+
+        codes = get_codes()
+        code_obj = None
+        code_idx = -1
+        for i, c in enumerate(codes):
+            if c['id'] == code_id and c['owner_id'] == user['id'] and c.get('is_active', True):
+                code_obj = c
+                code_idx = i
+                break
+
+        if not code_obj:
+            self.send_error_json('口令不存在或无权操作', 404)
+            return
+
+        current_app_ids = code_obj.get('app_ids', [])
+        if not current_app_ids and code_obj.get('app_id'):
+            current_app_ids = [code_obj['app_id']]
+
+        apps = get_apps()
+        for aid in app_ids:
+            found = False
+            for a in apps:
+                if a['id'] == aid and a['owner_id'] == user['id']:
+                    found = True
+                    break
+            if not found:
+                self.send_error_json(f'应用ID {aid} 不存在或无权操作', 400)
+                return
+
+        if action == 'add':
+            new_app_ids = list(current_app_ids)
+            for aid in app_ids:
+                if aid not in new_app_ids:
+                    new_app_ids.append(aid)
+        elif action == 'remove':
+            new_app_ids = [aid for aid in current_app_ids if aid not in app_ids]
+        else:
+            new_app_ids = list(app_ids)
+
+        if len(new_app_ids) > MAX_APPS_PER_CODE:
+            self.send_error_json(f'一个口令最多包含{MAX_APPS_PER_CODE}个应用', 400)
+            return
+
+        if len(new_app_ids) == 0:
+            self.send_error_json('口令至少需要包含一个应用', 400)
+            return
+
+        codes[code_idx]['app_ids'] = new_app_ids
+        codes[code_idx]['app_id'] = None
+        save_codes(codes)
+
+        result_apps = []
+        categories = get_categories()
+        cat_map = {c['id']: c for c in categories}
+        for aid in new_app_ids:
+            app = get_app_by_id(aid)
+            if app:
+                cat_name = cat_map.get(app.get('category_id'), {}).get('name', '')
+                result_apps.append({
+                    'id': app['id'],
+                    'name': app['name'],
+                    'category_name': cat_name
+                })
+
+        self.send_json({
+            'code': code_obj['code'],
+            'app_ids': new_app_ids,
+            'apps': result_apps,
+            'message': f'口令已更新，当前包含{len(new_app_ids)}个应用'
         })
 
     def handle_create_category(self):

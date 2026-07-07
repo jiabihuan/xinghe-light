@@ -287,14 +287,33 @@
                         <button class="modal-close" onclick="closeModal('multi-code-modal')">&times;</button>
                     </div>
                     <div class="modal-body">
-                        <p class="modal-desc">选择要加入口令的应用（最多10个）</p>
+                        <p class="modal-desc">选择要加入口令的应用（最多100个）</p>
                         <div class="app-select-list" id="multi-code-app-list">
                         </div>
-                        <p class="select-count">已选择 <span id="multi-code-count">0</span> / 10 个应用</p>
+                        <p class="select-count">已选择 <span id="multi-code-count">0</span> / 100 个应用</p>
                     </div>
                     <div class="modal-footer">
                         <button class="btn-secondary" onclick="closeModal('multi-code-modal')">取消</button>
                         <button class="btn-primary" id="btn-create-multi-confirm">创建口令</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-mask hidden" id="edit-code-apps-modal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>管理口令应用 - <span id="edit-code-display"></span></h3>
+                        <button class="modal-close" onclick="closeModal('edit-code-apps-modal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="modal-desc">勾选或取消勾选以调整口令中的应用（最多100个）</p>
+                        <div class="app-select-list" id="edit-code-app-list">
+                        </div>
+                        <p class="select-count">已选择 <span id="edit-code-count">0</span> / 100 个应用</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn-secondary" onclick="closeModal('edit-code-apps-modal')">取消</button>
+                        <button class="btn-primary" id="btn-edit-code-apps-confirm">保存</button>
                     </div>
                 </div>
             </div>
@@ -403,10 +422,10 @@
                             <input type="text" id="premium-code" placeholder="如：AAAA、8888、6666">
                         </div>
                         <div class="form-group">
-                            <label>选择应用（可多选，最多10个）</label>
+                            <label>选择应用（可多选，最多100个）</label>
                             <div class="app-select-list" id="premium-app-list">
                             </div>
-                            <p class="select-count">已选择 <span id="premium-app-count">0</span> / 10 个应用</p>
+                            <p class="select-count">已选择 <span id="premium-app-count">0</span> / 100 个应用</p>
                         </div>
                         <div class="form-group">
                             <label>备注（可选）</label>
