@@ -76,7 +76,10 @@ SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "admin123456")
 MAX_APPS_PER_USER = 100
 MAX_APPS_PER_CODE = 100
 MAX_CODES_TO_MERGE = 10
-MAX_CODES_PER_USER = 10
+MAX_SINGLE_CODES_PER_USER = 100
+MAX_COMBINED_CODES_PER_USER = 10
+SINGLE_CODE_EXPIRE_DAYS = 3
+COMBINED_CODE_EXPIRE_DAYS = 7
 CODE_LENGTH = 4
 CODE_CHARS = "0123456789ABCDEF"
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024
@@ -112,7 +115,7 @@ def check_ip_rate_limit(ip):
 
 def get_user_active_code_count(user_id):
     codes = get_codes()
-    return sum(1 for c in codes if c['owner_id'] == user_id and c.get('is_active', True))
+    return sum(1 for c in codes if c['owner_id'] == user_id and c.get('is_active', True) and not is_code_expired(c))
 
 
 def create_token(user_id: int) -> str:
@@ -494,9 +497,54 @@ def get_app_by_id(app_id):
 
 def get_code_by_code(code_str):
     for c in get_codes():
-        if c['code'] == code_str and c['is_active']:
-            return c
+        if c['code'] == code_str and c.get('is_active', True):
+            if not is_code_expired(c):
+                return c
     return None
+
+
+def is_code_expired(code_obj):
+    expire_at = code_obj.get('expire_at')
+    if not expire_at:
+        return False
+    try:
+        expire_time = time.mktime(time.strptime(expire_at, '%Y-%m-%d %H:%M:%S'))
+        return time.time() > expire_time
+    except:
+        return False
+
+
+def get_code_expire_time(code_type='single'):
+    days = SINGLE_CODE_EXPIRE_DAYS if code_type == 'single' else COMBINED_CODE_EXPIRE_DAYS
+    expire_timestamp = time.time() + days * 86400
+    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expire_timestamp))
+
+
+def get_user_single_code_count(user_id):
+    codes = get_codes()
+    count = 0
+    for c in codes:
+        if c['owner_id'] != user_id or not c.get('is_active', True):
+            continue
+        if is_code_expired(c):
+            continue
+        if c.get('code_type') == 'combined':
+            continue
+        count += 1
+    return count
+
+
+def get_user_combined_code_count(user_id):
+    codes = get_codes()
+    count = 0
+    for c in codes:
+        if c['owner_id'] != user_id or not c.get('is_active', True):
+            continue
+        if is_code_expired(c):
+            continue
+        if c.get('code_type') == 'combined':
+            count += 1
+    return count
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -755,8 +803,10 @@ class Handler(BaseHTTPRequestHandler):
             cat_map = {c['id']: c for c in categories}
             result = []
             for c in sorted(codes, key=lambda x: x['id'], reverse=True):
-                if c['owner_id'] != user['id'] or not c['is_active']:
+                if c['owner_id'] != user['id'] or not c.get('is_active', True):
                     continue
+                is_expired = is_code_expired(c)
+                code_type = c.get('code_type', 'single')
                 app_ids = c.get('app_ids', [])
                 if not app_ids and c.get('app_id'):
                     app_ids = [c['app_id']]
@@ -775,6 +825,9 @@ class Handler(BaseHTTPRequestHandler):
                     'code': c['code'],
                     'app_ids': app_ids,
                     'apps': code_apps,
+                    'code_type': code_type,
+                    'is_expired': is_expired,
+                    'expire_at': c.get('expire_at', ''),
                     'created_at': c['created_at']
                 })
             self.send_json(result)
@@ -1096,8 +1149,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json(f'每个用户最多上传{MAX_APPS_PER_USER}个应用', 400)
                 return
 
-            if get_user_active_code_count(user['id']) >= MAX_CODES_PER_USER:
-                self.send_error_json(f'每人最多{MAX_CODES_PER_USER}个口令，请先删除部分口令', 400)
+            if get_user_single_code_count(user['id']) >= MAX_SINGLE_CODES_PER_USER:
+                self.send_error_json(f'每人最多{MAX_SINGLE_CODES_PER_USER}个单码口令，请先等待过期或删除部分口令', 400)
                 return
 
             content_type = self.headers.get('Content-Type', '')
@@ -1230,6 +1283,8 @@ class Handler(BaseHTTPRequestHandler):
                     'app_ids': [],
                     'owner_id': user['id'],
                     'is_active': True,
+                    'code_type': 'single',
+                    'expire_at': get_code_expire_time('single'),
                     'created_at': now
                 }
                 codes.append(code)
@@ -1330,6 +1385,8 @@ class Handler(BaseHTTPRequestHandler):
                 'app_ids': [],
                 'owner_id': user['id'],
                 'is_active': True,
+                'code_type': 'single',
+                'expire_at': get_code_expire_time('single'),
                 'created_at': now
             }
             codes.append(code)
@@ -1376,8 +1433,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json('操作过于频繁，请30秒后再试', 429)
             return
 
-        if get_user_active_code_count(user['id']) >= MAX_CODES_PER_USER:
-            self.send_error_json(f'每人最多{MAX_CODES_PER_USER}个口令，请先删除部分口令', 400)
+        if get_user_single_code_count(user['id']) >= MAX_SINGLE_CODES_PER_USER:
+            self.send_error_json(f'每人最多{MAX_SINGLE_CODES_PER_USER}个单码口令，请先等待过期或删除部分口令', 400)
             return
 
         apps = get_apps()
@@ -1407,11 +1464,13 @@ class Handler(BaseHTTPRequestHandler):
             'app_ids': [],
             'owner_id': user['id'],
             'is_active': True,
+            'code_type': 'single',
+            'expire_at': get_code_expire_time('single'),
             'created_at': now
         }
         codes.append(code)
         save_codes(codes)
-        self.send_json({'code': code_str})
+        self.send_json({'code': code_str, 'expire_at': code['expire_at']})
 
     def handle_merge_codes(self):
         user = self.get_current_user()
@@ -1422,6 +1481,10 @@ class Handler(BaseHTTPRequestHandler):
         client_ip = self.client_address[0]
         if not check_ip_rate_limit(client_ip):
             self.send_error_json('操作过于频繁，请30秒后再试', 429)
+            return
+
+        if get_user_combined_code_count(user['id']) >= MAX_COMBINED_CODES_PER_USER:
+            self.send_error_json(f'每人最多{MAX_COMBINED_CODES_PER_USER}个组合口令，请先等待过期或删除部分口令', 400)
             return
 
         body = self.parse_json_body()
@@ -1437,7 +1500,7 @@ class Handler(BaseHTTPRequestHandler):
 
         codes = get_codes()
         apps = get_apps()
-        user_codes = [c for c in codes if c['owner_id'] == user['id'] and c['is_active']]
+        user_codes = [c for c in codes if c['owner_id'] == user['id'] and c.get('is_active', True) and not is_code_expired(c)]
 
         selected_codes = []
         all_app_ids = []
@@ -1455,7 +1518,7 @@ class Handler(BaseHTTPRequestHandler):
                             all_app_ids.append(aid)
                     break
             if not found:
-                self.send_error_json(f'口令ID {cid} 不存在或无权操作')
+                self.send_error_json(f'口令ID {cid} 不存在或已过期')
                 return
 
         if len(all_app_ids) > MAX_APPS_PER_CODE:
@@ -1482,6 +1545,8 @@ class Handler(BaseHTTPRequestHandler):
             'app_ids': all_app_ids,
             'owner_id': user['id'],
             'is_active': True,
+            'code_type': 'combined',
+            'expire_at': get_code_expire_time('combined'),
             'created_at': now
         }
         codes.append(new_code)
@@ -1518,8 +1583,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json('操作过于频繁，请30秒后再试', 429)
             return
 
-        if get_user_active_code_count(user['id']) >= MAX_CODES_PER_USER:
-            self.send_error_json(f'每人最多{MAX_CODES_PER_USER}个口令，请先删除部分口令', 400)
+        if get_user_combined_code_count(user['id']) >= MAX_COMBINED_CODES_PER_USER:
+            self.send_error_json(f'每人最多{MAX_COMBINED_CODES_PER_USER}个组合口令，请先等待过期或删除部分口令', 400)
             return
 
         body = self.parse_json_body()
@@ -1561,6 +1626,8 @@ class Handler(BaseHTTPRequestHandler):
             'app_ids': app_ids,
             'owner_id': user['id'],
             'is_active': True,
+            'code_type': 'combined',
+            'expire_at': get_code_expire_time('combined'),
             'created_at': now
         }
         codes.append(code)
@@ -1583,6 +1650,7 @@ class Handler(BaseHTTPRequestHandler):
             'code': code_str,
             'app_ids': app_ids,
             'apps': merged_apps,
+            'expire_at': code['expire_at'],
             'message': f'成功创建口令，包含{len(app_ids)}个应用'
         })
 
