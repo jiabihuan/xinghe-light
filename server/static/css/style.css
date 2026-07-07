@@ -548,6 +548,39 @@ body {
     letter-spacing: 3px;
 }
 
+.code-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.badge-single {
+    background: #e6f7ff;
+    color: #1890ff;
+}
+
+.badge-combined {
+    background: #f6ffed;
+    color: #52c41a;
+}
+
+.badge-expired {
+    background: #fff1f0;
+    color: #f5222d;
+}
+
+.code-expired {
+    opacity: 0.6;
+    background: #fafafa;
+}
+
+.code-expired:hover {
+    border-color: var(--border-light);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
 .code-delete-btn {
     padding: 4px 12px;
     background: #fef0f0;

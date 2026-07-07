@@ -447,16 +447,28 @@ async function loadCodes() {
         }
 
         empty.style.display = 'none';
-        list.innerHTML = codes.map(code => `
-            <div class="code-card">
+        list.innerHTML = codes.map(code => {
+            const typeText = code.code_type === 'combined' ? '组合口令' : '单码口令';
+            const typeClass = code.code_type === 'combined' ? 'badge-combined' : 'badge-single';
+            const expiredClass = code.is_expired ? 'code-expired' : '';
+            const expireText = code.is_expired ? '已过期' : `过期: ${code.expire_at}`;
+
+            return `
+            <div class="code-card ${expiredClass}">
                 <div class="code-card-header">
-                    <div class="code-display">${code.code}</div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <div class="code-display">${code.code}</div>
+                        <span class="code-badge ${typeClass}">${typeText}</span>
+                        ${code.is_expired ? '<span class="code-badge badge-expired">已过期</span>' : ''}
+                    </div>
                     <div style="display:flex;gap:8px">
-                        <button class="action-btn edit" onclick="openEditCodeApps(${code.id}, '${code.code}')">管理应用</button>
+                        ${!code.is_expired ? `<button class="action-btn edit" onclick="openEditCodeApps(${code.id}, '${code.code}')">管理应用</button>` : ''}
                         <button class="code-delete-btn" onclick="deleteCodeById(${code.id})">删除</button>
                     </div>
                 </div>
-                <div style="font-size:12px;color:#999;margin-bottom:8px">${code.apps.length} 个应用 · 创建于 ${code.created_at}</div>
+                <div style="font-size:12px;color:#999;margin-bottom:8px">
+                    ${code.apps.length} 个应用 · 创建于 ${code.created_at} · ${expireText}
+                </div>
                 <div class="app-list">
                     ${code.apps.slice(0, 10).map(app => `
                         <div class="app-item">
@@ -468,7 +480,7 @@ async function loadCodes() {
                     ${code.apps.length > 10 ? `<div style="font-size:12px;color:#999;padding-left:14px;margin-top:4px">还有 ${code.apps.length - 10} 个应用...</div>` : ''}
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     } catch (err) {
         showToast('加载口令失败', 'error');
     }
