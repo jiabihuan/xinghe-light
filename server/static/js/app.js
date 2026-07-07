@@ -401,7 +401,7 @@ document.getElementById('btn-upload-confirm').addEventListener('click', () => {
                     loadApps();
                 }, 500);
             } else {
-                showToast(data.detail || '上传失败', 'error');
+                showToast(data.message || data.detail || data.error || '上传失败', 'error');
             }
         } catch (e) {
             showToast('上传失败', 'error');

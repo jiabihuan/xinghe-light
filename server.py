@@ -1083,130 +1083,164 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def handle_upload(self):
-        user = self.get_current_user()
-        if not user:
-            self.send_error_json('未授权', 401)
-            return
+        try:
+            user = self.get_current_user()
+            if not user:
+                self.send_error_json('未授权', 401)
+                return
 
-        apps = get_apps()
-        user_app_count = sum(1 for a in apps if a['owner_id'] == user['id'])
-        if user_app_count >= MAX_APPS_PER_USER:
-            self.send_error_json(f'每个用户最多上传{MAX_APPS_PER_USER}个应用')
-            return
+            apps = get_apps()
+            user_app_count = sum(1 for a in apps if a['owner_id'] == user['id'])
+            if user_app_count >= MAX_APPS_PER_USER:
+                self.send_error_json(f'每个用户最多上传{MAX_APPS_PER_USER}个应用', 400)
+                return
 
-        content_type = self.headers.get('Content-Type', '')
-        if 'multipart/form-data' not in content_type:
-            self.send_error_json('请上传文件')
-            return
+            if get_user_active_code_count(user['id']) >= MAX_CODES_PER_USER:
+                self.send_error_json(f'每人最多{MAX_CODES_PER_USER}个口令，请先删除部分口令', 400)
+                return
 
-        length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length) if length > 0 else b''
-        form = parse_multipart(content_type, body)
+            content_type = self.headers.get('Content-Type', '')
+            if 'multipart/form-data' not in content_type:
+                self.send_error_json('请上传文件', 400)
+                return
 
-        if 'file' not in form or not isinstance(form['file'], dict):
-            self.send_error_json('请选择文件')
-            return
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length) if length > 0 else b''
+            form = parse_multipart(content_type, body)
 
-        file_item = form['file']
-        filename = file_item.get('filename', 'app.apk') or 'app.apk'
-        if not filename.lower().endswith('.apk'):
-            self.send_error_json('只能上传APK文件')
-            return
+            if 'file' not in form or not isinstance(form['file'], dict):
+                self.send_error_json('请选择文件', 400)
+                return
 
-        file_data = file_item.get('content', b'')
-        if not file_data:
-            self.send_error_json('文件不能为空')
-            return
+            file_item = form['file']
+            filename = file_item.get('filename', 'app.apk') or 'app.apk'
+            if not filename.lower().endswith('.apk'):
+                self.send_error_json('只能上传APK文件', 400)
+                return
 
-        apk_size = len(file_data)
-        file_id = str(uuid.uuid4())
-        save_name = f"{file_id}.apk"
-        save_path = APK_DIR / save_name
+            file_data = file_item.get('content', b'')
+            if not file_data:
+                self.send_error_json('文件不能为空', 400)
+                return
 
-        with open(save_path, 'wb') as f:
-            f.write(file_data)
+            apk_size = len(file_data)
+            file_id = str(uuid.uuid4())
+            save_name = f"{file_id}.apk"
+            save_path = APK_DIR / save_name
 
-        apk_info = parse_apk_info(str(save_path))
-        app_name = apk_info['app_name'] if apk_info['app_name'] else (form.get('app_name') or filename.rsplit('.', 1)[0])
-        if isinstance(app_name, dict):
-            app_name = filename.rsplit('.', 1)[0]
-        package_name = apk_info['package_name'] if apk_info['package_name'] else f"com.uploaded.{secrets.token_hex(4)}"
-        version_name = apk_info['version_name'] if apk_info['version_name'] else "1.0"
+            with open(save_path, 'wb') as f:
+                f.write(file_data)
 
-        icon_url = ''
-        if apk_info['icon_data']:
-            app_id_temp = next_id(apps)
-            icon_path = save_icon(app_id_temp, apk_info['icon_data'])
-            icon_url = f'/api/icons/{app_id_temp}.png'
+            try:
+                apk_info = parse_apk_info(str(save_path))
+            except Exception as e:
+                print(f"[UPLOAD] parse_apk_info error: {e}")
+                apk_info = {
+                    'app_name': '',
+                    'package_name': '',
+                    'version_name': '1.0',
+                    'version_code': 1,
+                    'icon_data': None
+                }
 
-        category_id = 0
-        cat_str = form.get('category_id')
-        if cat_str and cat_str.isdigit():
-            category_id = int(cat_str)
+            app_name = apk_info['app_name'] if apk_info['app_name'] else (form.get('app_name') or filename.rsplit('.', 1)[0])
+            if isinstance(app_name, dict):
+                app_name = filename.rsplit('.', 1)[0]
+            package_name = apk_info['package_name'] if apk_info['package_name'] else f"com.uploaded.{secrets.token_hex(4)}"
+            version_name = apk_info['version_name'] if apk_info['version_name'] else "1.0"
 
-        now = time.strftime('%Y-%m-%d %H:%M:%S')
-        app_id = next_id(apps)
-        app = {
-            'id': app_id,
-            'name': app_name,
-            'package_name': package_name,
-            'version_name': version_name,
-            'version_code': apk_info['version_code'],
-            'apk_path': str(save_path),
-            'apk_size': apk_size,
-            'description': '',
-            'owner_id': user['id'],
-            'real_app_id': None,
-            'is_duplicate': False,
-            'download_count': 0,
-            'category_id': category_id,
-            'icon_url': icon_url,
-            'created_at': now
-        }
-        apps.append(app)
-        save_apps(apps)
+            icon_url = ''
+            if apk_info.get('icon_data'):
+                try:
+                    app_id_temp = next_id(apps)
+                    icon_path = save_icon(app_id_temp, apk_info['icon_data'])
+                    icon_url = f'/api/icons/{app_id_temp}.png'
+                except Exception as e:
+                    print(f"[UPLOAD] save_icon error: {e}")
+                    icon_url = ''
 
-        codes = get_codes()
-        code_id = next_id(codes)
-        for _ in range(100):
-            code_str = generate_code()
-            if not any(c['code'] == code_str for c in codes):
-                break
-        else:
-            self.send_error_json('生成口令失败，请重试', 500)
-            return
+            category_id = 0
+            cat_str = form.get('category_id')
+            if cat_str and str(cat_str).isdigit():
+                category_id = int(cat_str)
 
-        code = {
-            'id': code_id,
-            'code': code_str,
-            'app_id': app_id,
-            'app_ids': [],
-            'owner_id': user['id'],
-            'is_active': True,
-            'created_at': now
-        }
-        codes.append(code)
-        save_codes(codes)
+            now = time.strftime('%Y-%m-%d %H:%M:%S')
+            app_id = next_id(apps)
+            app = {
+                'id': app_id,
+                'name': app_name,
+                'package_name': package_name,
+                'version_name': version_name,
+                'version_code': apk_info.get('version_code', 1),
+                'apk_path': str(save_path),
+                'apk_size': apk_size,
+                'description': '',
+                'owner_id': user['id'],
+                'real_app_id': None,
+                'is_duplicate': False,
+                'download_count': 0,
+                'category_id': category_id,
+                'icon_url': icon_url,
+                'created_at': now
+            }
+            apps.append(app)
+            save_apps(apps)
 
-        categories = get_categories()
-        cat_map = {c['id']: c for c in categories}
-        cat_name = cat_map.get(category_id, {}).get('name', '')
+            codes = get_codes()
+            code_id = next_id(codes)
+            code_str = None
+            for _ in range(100):
+                code_str = generate_code()
+                if not any(c['code'] == code_str for c in codes):
+                    break
+            else:
+                code_str = None
 
-        self.send_json({
-            'id': app['id'],
-            'name': app['name'],
-            'package_name': app['package_name'],
-            'version_name': app['version_name'],
-            'apk_size': app['apk_size'],
-            'apk_size_str': format_size(app['apk_size']),
-            'is_duplicate': app['is_duplicate'],
-            'download_count': app['download_count'],
-            'category_id': category_id,
-            'category_name': cat_name,
-            'icon_url': icon_url,
-            'created_at': app['created_at'],
-            'codes': [code_str]
-        })
+            if not code_str:
+                self.send_error_json('生成口令失败，请重试', 500)
+                return
+
+            code = {
+                'id': code_id,
+                'code': code_str,
+                'app_id': app_id,
+                'app_ids': [],
+                'owner_id': user['id'],
+                'is_active': True,
+                'created_at': now
+            }
+            codes.append(code)
+            save_codes(codes)
+
+            categories = get_categories()
+            cat_map = {c['id']: c for c in categories}
+            cat_name = cat_map.get(category_id, {}).get('name', '')
+
+            self.send_json({
+                'id': app['id'],
+                'name': app['name'],
+                'package_name': app['package_name'],
+                'version_name': app['version_name'],
+                'apk_size': app['apk_size'],
+                'apk_size_str': format_size(app['apk_size']),
+                'is_duplicate': app['is_duplicate'],
+                'download_count': app['download_count'],
+                'category_id': category_id,
+                'category_name': cat_name,
+                'icon_url': icon_url,
+                'created_at': app['created_at'],
+                'codes': [code_str],
+                'code': code_str,
+                'code_id': code['id']
+            })
+        except Exception as e:
+            import traceback
+            print(f"[UPLOAD ERROR] {e}")
+            traceback.print_exc()
+            try:
+                self.send_error_json(f'上传失败：{str(e)}', 500)
+            except:
+                pass
 
     def handle_generate_code(self, app_id):
         user = self.get_current_user()
