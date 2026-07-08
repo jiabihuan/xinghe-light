@@ -2383,6 +2383,8 @@ class Handler(BaseHTTPRequestHandler):
             'app_ids': premium_code['app_ids'],
             'owner_id': target_user_id,
             'is_active': True,
+            'code_type': 'combined',
+            'expire_at': get_code_expire_time('combined'),
             'created_at': now
         }
         codes.append(new_code)
