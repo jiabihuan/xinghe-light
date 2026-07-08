@@ -1020,8 +1020,8 @@ async function loadPremiumCodes() {
                 <td>${c.assigned_user_id ? '用户ID: ' + c.assigned_user_id : '-'}</td>
                 <td>${c.created_at}</td>
                 <td>
-                    ${!c.is_used && c.is_active ? `
-                        <button class="action-btn edit" onclick="openAssignPremium(${c.id}, '${c.code}')">分配</button>
+                    ${c.is_active ? `
+                        ${!c.is_used ? `<button class="action-btn edit" onclick="openAssignPremium(${c.id}, '${c.code}')">分配</button>` : ''}
                         <button class="action-btn delete" onclick="deletePremiumCode(${c.id})">删除</button>
                     ` : '-'}
                 </td>

@@ -2409,15 +2409,24 @@ class Handler(BaseHTTPRequestHandler):
 
         premium_codes = get_premium_codes()
         found = False
+        premium_code = None
         for pc in premium_codes:
             if pc['id'] == code_id:
                 pc['is_active'] = False
                 found = True
+                premium_code = pc
                 break
 
         if not found:
             self.send_error_json('豹子号不存在', 404)
             return
+
+        if premium_code.get('is_used'):
+            codes = get_codes()
+            for c in codes:
+                if c['code'] == premium_code['code'] and c.get('is_active', True):
+                    c['is_active'] = False
+            save_codes(codes)
 
         save_premium_codes(premium_codes)
         self.send_json({'message': '删除成功'})
