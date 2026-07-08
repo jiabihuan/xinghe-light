@@ -781,7 +781,9 @@ class Handler(BaseHTTPRequestHandler):
             if not user or not user['is_super_admin']:
                 self.send_error_json('需要超级管理员权限', 403)
                 return
-            self.send_json(get_premium_codes())
+            premium_codes = get_premium_codes()
+            active_codes = [pc for pc in premium_codes if pc.get('is_active', True)]
+            self.send_json(active_codes)
             return
 
         if path == '/api/categories':
