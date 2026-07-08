@@ -705,7 +705,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json('未授权', 401)
                 return
             apps = get_apps()
-            user_apps = [a for a in apps if a['owner_id'] == user['id']]
+            codes = get_codes()
+
+            # 收集当前用户拥有的所有口令关联的应用ID（包括豹子号分配的）
+            user_code_app_ids = set()
+            for c in codes:
+                if c['owner_id'] == user['id'] and c.get('is_active', True):
+                    app_ids = c.get('app_ids', [])
+                    if not app_ids and c.get('app_id'):
+                        app_ids = [c['app_id']]
+                    for aid in app_ids:
+                        user_code_app_ids.add(aid)
+
+            # 用户能看到：自己上传的应用 + 豹子号分配的应用
+            user_apps = [a for a in apps if a['owner_id'] == user['id'] or a['id'] in user_code_app_ids]
             user_apps.sort(key=lambda x: x['id'], reverse=True)
             codes = get_codes()
             categories = get_categories()
@@ -743,11 +756,27 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json('未授权', 401)
                 return
             apps = get_apps()
-            count = sum(1 for a in apps if a['owner_id'] == user['id'])
+            codes = get_codes()
+
+            # 收集豹子号关联的应用ID
+            user_code_app_ids = set()
+            for c in codes:
+                if c['owner_id'] == user['id'] and c.get('is_active', True):
+                    app_ids = c.get('app_ids', [])
+                    if not app_ids and c.get('app_id'):
+                        app_ids = [c['app_id']]
+                    for aid in app_ids:
+                        user_code_app_ids.add(aid)
+
+            # 统计自己上传的 + 豹子号分配的（去重）
+            own_app_ids = set(a['id'] for a in apps if a['owner_id'] == user['id'])
+            all_app_ids = own_app_ids | user_code_app_ids
+            count = len(all_app_ids)
+
             self.send_json({
                 'count': count,
                 'max': MAX_APPS_PER_USER,
-                'remaining': MAX_APPS_PER_USER - count
+                'remaining': max(0, MAX_APPS_PER_USER - count)
             })
             return
 
@@ -1670,10 +1699,12 @@ class Handler(BaseHTTPRequestHandler):
         code_obj = None
         code_idx = -1
         for i, c in enumerate(codes):
-            if c['id'] == code_id and c['owner_id'] == user['id'] and c.get('is_active', True):
-                code_obj = c
-                code_idx = i
-                break
+            if c['id'] == code_id and c.get('is_active', True):
+                # 允许口令所有者或超级管理员操作
+                if c['owner_id'] == user['id'] or user.get('is_super_admin'):
+                    code_obj = c
+                    code_idx = i
+                    break
 
         if not code_obj:
             self.send_error_json('口令不存在或无权操作', 404)
