@@ -1621,16 +1621,17 @@ class Handler(BaseHTTPRequestHandler):
         body = self.parse_json_body()
         app_ids = body.get('app_ids', [])
 
-        if not app_ids:
-            self.send_error_json('请选择应用')
-            return
+        # 允许创建空的组合码，用户后续可自行添加应用
+        # if not app_ids:
+        #     self.send_error_json('请选择应用')
+        #     return
 
-        if len(app_ids) > MAX_APPS_PER_CODE:
+        if app_ids and len(app_ids) > MAX_APPS_PER_CODE:
             self.send_error_json(f'一个口令最多包含{MAX_APPS_PER_CODE}个应用')
             return
 
         apps = get_apps()
-        for aid in app_ids:
+        for aid in (app_ids or []):
             found = False
             for a in apps:
                 if a['id'] == aid and a['owner_id'] == user['id']:
@@ -1739,9 +1740,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json(f'一个口令最多包含{MAX_APPS_PER_CODE}个应用', 400)
             return
 
-        if len(new_app_ids) == 0:
-            self.send_error_json('口令至少需要包含一个应用', 400)
-            return
+        # 允许空口令，用户可自行添加应用
+        # if len(new_app_ids) == 0:
+        #     self.send_error_json('口令至少需要包含一个应用', 400)
+        #     return
 
         codes[code_idx]['app_ids'] = new_app_ids
         codes[code_idx]['app_id'] = None
@@ -2350,8 +2352,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             app_ids = [app_id]
         else:
-            self.send_error_json('请选择应用')
-            return
+            # 允许创建空的豹子号，管理员分配后用户可自行添加应用
+            app_ids = []
 
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         new_code = {
