@@ -2296,7 +2296,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         premium_codes = get_premium_codes()
-        if any(c['code'] == code_str for c in premium_codes):
+        if any(c['code'] == code_str and c.get('is_active', True) for c in premium_codes):
             self.send_error_json('该豹子号已存在')
             return
 
