@@ -548,7 +548,7 @@ def get_user_combined_code_count(user_id):
 
 
 class Handler(BaseHTTPRequestHandler):
-    timeout = 300
+    timeout = 600
 
     def log_message(self, format, *args):
         pass
@@ -594,7 +594,16 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', 0))
         if length == 0:
             return {}
-        body = self.rfile.read(length).decode('utf-8')
+        # 循环读取确保完整
+        raw_body = b''
+        remaining = length
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 65536))
+            if not chunk:
+                break
+            raw_body += chunk
+            remaining -= len(chunk)
+        body = raw_body.decode('utf-8')
         try:
             return json.loads(body)
         except:
@@ -1201,8 +1210,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error_json('文件不能为空', 400)
                 return
 
-            body = self.rfile.read(length)
-            print(f"[UPLOAD] 读取完成，实际读取: {len(body)} bytes")
+            # 循环读取确保数据完整（修复大文件上传失败）
+            body = b''
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                body += chunk
+                remaining -= len(chunk)
+
+            print(f"[UPLOAD] 读取完成，实际读取: {len(body)} bytes，期望: {length} bytes")
             form = parse_multipart(content_type, body)
 
             if 'file' not in form or not isinstance(form['file'], dict):
