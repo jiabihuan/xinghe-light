@@ -9,7 +9,7 @@ import time
 import uuid
 import mimetypes
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 import re
 
@@ -432,9 +432,32 @@ def parse_multipart(content_type, body):
             continue
         name = name_match.group(1)
 
-        filename_match = re.search(r'filename="([^"]*)"', headers_text)
-        if filename_match:
-            filename = filename_match.group(1)
+        # 支持中文文件名：RFC 5987 / RFC 2231 编码
+        filename = None
+        # 1. 先尝试 filename*=UTF-8''xxx 格式
+        filename_star_match = re.search(r"filename\*\s*=\s*([^\s;]+)", headers_text)
+        if filename_star_match:
+            encoded = filename_star_match.group(1)
+            try:
+                if "''" in encoded:
+                    charset, _, value = encoded.partition("''")
+                    filename = unquote(value, encoding=charset or 'utf-8')
+                else:
+                    filename = unquote(encoded, encoding='utf-8')
+            except Exception:
+                pass
+
+        # 2. 再尝试普通 filename="xxx"
+        if not filename:
+            filename_match = re.search(r'filename="([^"]*)"', headers_text)
+            if filename_match:
+                filename = filename_match.group(1)
+
+        # 3. 处理可能的转义字符
+        if filename:
+            filename = filename.replace('\\\\', '\\').replace('\\"', '"')
+
+        if filename:
             result[name] = {
                 'filename': filename,
                 'content': content,
