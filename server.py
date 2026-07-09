@@ -413,22 +413,18 @@ def parse_multipart(content_type, body):
         if not part or part == b'--':
             continue
 
-        header_end = part.find(b'
-
-')
+        header_end = part.find(b'\r\n\r\n')
         if header_end == -1:
             continue
 
         headers_text = part[:header_end].decode('utf-8', errors='ignore')
         content = part[header_end + 4:]
 
-        while content.endswith(b'
-'):
+        while content.endswith(b'\r\n'):
             content = content[:-2]
         if content.endswith(b'--'):
             content = content[:-2]
-        while content.endswith(b'
-'):
+        while content.endswith(b'\r\n'):
             content = content[:-2]
 
         name_match = re.search(r'name="([^"]+)"', headers_text)
@@ -474,6 +470,7 @@ def parse_multipart(content_type, body):
                 result[name] = content
 
     return result
+
 
 def init_data():
     users = get_users()
