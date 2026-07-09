@@ -413,18 +413,22 @@ def parse_multipart(content_type, body):
         if not part or part == b'--':
             continue
 
-        header_end = part.find(b'\r\n\r\n')
+        header_end = part.find(b'
+
+')
         if header_end == -1:
             continue
 
         headers_text = part[:header_end].decode('utf-8', errors='ignore')
         content = part[header_end + 4:]
 
-        while content.endswith(b'\r\n'):
+        while content.endswith(b'
+'):
             content = content[:-2]
         if content.endswith(b'--'):
             content = content[:-2]
-        while content.endswith(b'\r\n'):
+        while content.endswith(b'
+'):
             content = content[:-2]
 
         name_match = re.search(r'name="([^"]+)"', headers_text)
@@ -435,7 +439,7 @@ def parse_multipart(content_type, body):
         # 支持中文文件名：RFC 5987 / RFC 2231 编码
         filename = None
         # 1. 先尝试 filename*=UTF-8''xxx 格式
-        filename_star_match = re.search(r"filename\*\s*=\s*([^\s;]+)", headers_text)
+        filename_star_match = re.search(r"filename[*]\s*=\s*([^\s;]+)", headers_text)
         if filename_star_match:
             encoded = filename_star_match.group(1)
             try:
@@ -470,7 +474,6 @@ def parse_multipart(content_type, body):
                 result[name] = content
 
     return result
-
 
 def init_data():
     users = get_users()
