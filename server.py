@@ -528,6 +528,8 @@ def get_code_by_code(code_str):
 
 def is_code_expired(code_obj):
     expire_at = code_obj.get('expire_at')
+    if expire_at is None:
+        return False  # 永久有效（超级管理员分配的豹子号）
     if not expire_at:
         return False
     try:
@@ -2460,7 +2462,7 @@ class Handler(BaseHTTPRequestHandler):
             'owner_id': target_user_id,
             'is_active': True,
             'code_type': 'combined',
-            'expire_at': get_code_expire_time('combined'),
+            'expire_at': None,  # 超级管理员分配的豹子号永久有效
             'created_at': now
         }
         codes.append(new_code)
