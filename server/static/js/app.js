@@ -1087,10 +1087,11 @@ document.getElementById('btn-add-premium-confirm').addEventListener('click', asy
         showToast('口令至少4个字符', 'error');
         return;
     }
-    if (selectedPremiumAppIds.length === 0) {
-        showToast('请选择应用', 'error');
-        return;
-    }
+    // 允许创建空的豹子号，不强制选择应用
+    // if (selectedPremiumAppIds.length === 0) {
+    //     showToast('请选择应用', 'error');
+    //     return;
+    // }
 
     try {
         await api('/admin/premium-codes', {
