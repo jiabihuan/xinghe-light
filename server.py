@@ -522,8 +522,53 @@ def get_code_by_code(code_str):
     for c in get_codes():
         if c['code'] == code_str and c.get('is_active', True):
             if not is_code_expired(c):
+                # 如果是组合码，清理其中已过期的单码应用
+                if c.get('code_type') == 'combined':
+                    c = clean_expired_apps_from_code(c)
                 return c
     return None
+
+def clean_expired_apps_from_code(code_obj):
+    '''清理组合码中已过期的单码应用'''
+    all_codes = get_codes()
+    app_ids = code_obj.get('app_ids', [])
+    if not app_ids and code_obj.get('app_id'):
+        app_ids = [code_obj['app_id']]
+
+    if not app_ids:
+        return code_obj
+
+    # 找出哪些应用是被单码关联的
+    expired_app_ids = set()
+    for app_id in app_ids:
+        # 检查是否有单码关联此应用且已过期
+        for single_code in all_codes:
+            if single_code.get('code_type') != 'single':
+                continue
+            if not single_code.get('is_active', True):
+                continue
+            single_app_id = single_code.get('app_id')
+            if single_app_id == app_id and is_code_expired(single_code):
+                expired_app_ids.add(app_id)
+                break
+
+    if expired_app_ids:
+        # 从组合码中移除过期应用
+        new_app_ids = [aid for aid in app_ids if aid not in expired_app_ids]
+        if new_app_ids != app_ids:
+            code_obj['app_ids'] = new_app_ids
+            # 如果组合码空了，标记为过期或删除
+            if not new_app_ids:
+                code_obj['is_active'] = False
+            # 保存修改
+            codes = get_codes()
+            for i, c in enumerate(codes):
+                if c['id'] == code_obj['id']:
+                    codes[i] = code_obj
+                    break
+            save_codes(codes)
+
+    return code_obj
 
 
 def is_code_expired(code_obj):
