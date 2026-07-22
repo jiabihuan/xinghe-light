@@ -7,6 +7,9 @@ echo ""
 
 INSTALL_DIR="/www/wwwroot/xinghe-light"
 PORT=8000
+REPO_URL="https://github.com/jiabihuan/xinghe-light.git"
+REPO_MIRROR="https://gitee.com/jiabihuan/xinghe-light.git"
+PROXY=""
 
 info() { echo -e "\033[32m[信息]\033[0m $1"; }
 error() { echo -e "\033[31m[错误]\033[0m $1"; }
@@ -56,11 +59,32 @@ if pgrep -f "server.py" > /dev/null; then
 fi
 
 info "拉取最新代码..."
+if [ -n "$PROXY" ]; then
+    info "使用代理: $PROXY"
+    export http_proxy="$PROXY"
+    export https_proxy="$PROXY"
+    git config --global http.proxy "$PROXY"
+    git config --global https.proxy "$PROXY"
+fi
+
 git fetch origin 2>&1
 git reset --hard origin/main 2>&1
 if [ $? -ne 0 ]; then
-    error "拉取失败，请检查网络或Git配置"
-    exit 1
+    warn "GitHub拉取失败，尝试使用Gitee镜像..."
+    git remote add mirror "$REPO_MIRROR" 2>/dev/null || true
+    git fetch mirror 2>&1
+    git reset --hard mirror/main 2>&1
+    if [ $? -ne 0 ]; then
+        error "拉取失败，请检查网络或设置代理"
+        exit 1
+    fi
+fi
+
+if [ -n "$PROXY" ]; then
+    git config --global --unset http.proxy
+    git config --global --unset https.proxy
+    unset http_proxy
+    unset https_proxy
 fi
 
 info "清理旧配置（重新生成持久化SECRET_KEY）..."

@@ -8,6 +8,8 @@ echo ""
 INSTALL_DIR="/www/wwwroot/xinghe-light"
 PORT=8000
 REPO_URL="https://github.com/jiabihuan/xinghe-light.git"
+REPO_MIRROR="https://gitee.com/jiabihuan/xinghe-light.git"
+PROXY=""
 
 info() { echo -e "\033[32m[信息]\033[0m $1"; }
 error() { echo -e "\033[31m[错误]\033[0m $1"; }
@@ -58,10 +60,29 @@ info "创建安装目录..."
 mkdir -p "$(dirname $INSTALL_DIR)"
 
 info "克隆代码..."
+if [ -n "$PROXY" ]; then
+    info "使用代理: $PROXY"
+    export http_proxy="$PROXY"
+    export https_proxy="$PROXY"
+    git config --global http.proxy "$PROXY"
+    git config --global https.proxy "$PROXY"
+fi
+
 git clone "$REPO_URL" "$INSTALL_DIR" 2>&1
 if [ $? -ne 0 ]; then
-    error "克隆失败"
-    exit 1
+    warn "GitHub克隆失败，尝试使用Gitee镜像..."
+    git clone "$REPO_MIRROR" "$INSTALL_DIR" 2>&1
+    if [ $? -ne 0 ]; then
+        error "克隆失败，请检查网络或设置代理"
+        exit 1
+    fi
+fi
+
+if [ -n "$PROXY" ]; then
+    git config --global --unset http.proxy
+    git config --global --unset https.proxy
+    unset http_proxy
+    unset https_proxy
 fi
 
 cd "$INSTALL_DIR"
