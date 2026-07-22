@@ -7,9 +7,9 @@ echo ""
 
 INSTALL_DIR="/www/wwwroot/xinghe-light"
 PORT=8000
-REPO_URL="https://github.com/jiabihuan/xinghe-light.git"
-REPO_MIRROR="https://gitee.com/jiabihuan/xinghe-light.git"
-GH_PROXY_URL="https://gh-proxy.org/https://github.com/jiabihuan/xinghe-light.git"
+GH_ZIP_URL="https://github.com/jiabihuan/xinghe-light/archive/refs/heads/main.zip"
+GH_PROXY_ZIP_URL="https://gh-proxy.org/https://github.com/jiabihuan/xinghe-light/archive/refs/heads/main.zip"
+GITEE_ZIP_URL="https://gitee.com/jiabihuan/xinghe-light/repository/archive/main.zip"
 PROXY=""
 
 info() { echo -e "\033[32m[信息]\033[0m $1"; }
@@ -59,40 +59,48 @@ if pgrep -f "server.py" > /dev/null; then
     sleep 1
 fi
 
-info "拉取最新代码..."
-if [ -n "$PROXY" ]; then
-    info "使用代理: $PROXY"
-    export http_proxy="$PROXY"
-    export https_proxy="$PROXY"
-    git config --global http.proxy "$PROXY"
-    git config --global https.proxy "$PROXY"
-fi
+info "下载最新代码..."
 
-git fetch origin 2>&1
-git reset --hard origin/main 2>&1
+download_zip() {
+    local url=$1
+    local tmp_file=$2
+    info "尝试下载: $url"
+    curl -fsSL "$url" -o "$tmp_file" 2>&1
+    return $?
+}
+
+TMP_ZIP=$(mktemp /tmp/xinghe_update_XXXXXX.zip)
+TMP_DIR=$(mktemp -d /tmp/xinghe_update_XXXXXX)
+
+download_zip "$GH_ZIP_URL" "$TMP_ZIP"
 if [ $? -ne 0 ]; then
-    warn "GitHub拉取失败，尝试使用gh-proxy镜像..."
-    git remote add ghproxy "$GH_PROXY_URL" 2>/dev/null || git remote set-url ghproxy "$GH_PROXY_URL"
-    git fetch ghproxy 2>&1
-    git reset --hard ghproxy/main 2>&1
+    warn "GitHub下载失败，尝试gh-proxy..."
+    download_zip "$GH_PROXY_ZIP_URL" "$TMP_ZIP"
     if [ $? -ne 0 ]; then
-        warn "gh-proxy失败，尝试使用Gitee镜像..."
-        git remote add mirror "$REPO_MIRROR" 2>/dev/null || true
-        git fetch mirror 2>&1
-        git reset --hard mirror/main 2>&1
+        warn "gh-proxy失败，尝试Gitee..."
+        download_zip "$GITEE_ZIP_URL" "$TMP_ZIP"
         if [ $? -ne 0 ]; then
-            error "拉取失败，请检查网络或设置代理"
+            error "下载失败，请检查网络"
+            rm -rf "$TMP_ZIP" "$TMP_DIR"
             exit 1
         fi
     fi
 fi
 
-if [ -n "$PROXY" ]; then
-    git config --global --unset http.proxy
-    git config --global --unset https.proxy
-    unset http_proxy
-    unset https_proxy
+info "解压代码..."
+unzip -q "$TMP_ZIP" -d "$TMP_DIR"
+rm -f "$TMP_ZIP"
+
+SRC_DIR=$(find "$TMP_DIR" -maxdepth 1 -type d | grep -v "$TMP_DIR" | head -1)
+if [ -z "$SRC_DIR" ]; then
+    error "解压失败"
+    rm -rf "$TMP_DIR"
+    exit 1
 fi
+
+info "覆盖更新文件..."
+rsync -av --delete "$SRC_DIR/" "$INSTALL_DIR/" 2>&1
+rm -rf "$TMP_DIR"
 
 info "清理旧配置（重新生成持久化SECRET_KEY）..."
 rm -f data/config.json

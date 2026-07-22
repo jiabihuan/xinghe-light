@@ -8,8 +8,10 @@ echo ""
 INSTALL_DIR="/www/wwwroot/xinghe-light"
 PORT=8000
 REPO_URL="https://github.com/jiabihuan/xinghe-light.git"
+GH_ZIP_URL="https://github.com/jiabihuan/xinghe-light/archive/refs/heads/main.zip"
+GH_PROXY_ZIP_URL="https://gh-proxy.org/https://github.com/jiabihuan/xinghe-light/archive/refs/heads/main.zip"
 REPO_MIRROR="https://gitee.com/jiabihuan/xinghe-light.git"
-GH_PROXY_URL="https://gh-proxy.org/https://github.com/jiabihuan/xinghe-light.git"
+GITEE_ZIP_URL="https://gitee.com/jiabihuan/xinghe-light/repository/archive/main.zip"
 PROXY=""
 
 info() { echo -e "\033[32m[信息]\033[0m $1"; }
@@ -60,34 +62,43 @@ fi
 info "创建安装目录..."
 mkdir -p "$(dirname $INSTALL_DIR)"
 
-info "克隆代码..."
-if [ -n "$PROXY" ]; then
-    info "使用代理: $PROXY"
-    export http_proxy="$PROXY"
-    export https_proxy="$PROXY"
-    git config --global http.proxy "$PROXY"
-    git config --global https.proxy "$PROXY"
-fi
+info "下载代码..."
 
-git clone "$REPO_URL" "$INSTALL_DIR" 2>&1
+download_zip() {
+    local url=$1
+    local tmp_file=$2
+    info "尝试下载: $url"
+    curl -fsSL "$url" -o "$tmp_file" 2>&1
+    return $?
+}
+
+TMP_ZIP=$(mktemp /tmp/xinghe_XXXXXX.zip)
+
+download_zip "$GH_ZIP_URL" "$TMP_ZIP"
 if [ $? -ne 0 ]; then
-    warn "GitHub克隆失败，尝试使用gh-proxy镜像..."
-    git clone "$GH_PROXY_URL" "$INSTALL_DIR" 2>&1
+    warn "GitHub下载失败，尝试gh-proxy..."
+    download_zip "$GH_PROXY_ZIP_URL" "$TMP_ZIP"
     if [ $? -ne 0 ]; then
-        warn "gh-proxy失败，尝试使用Gitee镜像..."
-        git clone "$REPO_MIRROR" "$INSTALL_DIR" 2>&1
+        warn "gh-proxy失败，尝试Gitee..."
+        download_zip "$GITEE_ZIP_URL" "$TMP_ZIP"
         if [ $? -ne 0 ]; then
-            error "克隆失败，请检查网络或设置代理"
+            error "下载失败，请检查网络"
+            rm -f "$TMP_ZIP"
             exit 1
         fi
     fi
 fi
 
-if [ -n "$PROXY" ]; then
-    git config --global --unset http.proxy
-    git config --global --unset https.proxy
-    unset http_proxy
-    unset https_proxy
+info "解压代码..."
+rm -rf "$INSTALL_DIR"
+unzip -q "$TMP_ZIP" -d "$(dirname $INSTALL_DIR)"
+rm -f "$TMP_ZIP"
+
+mv "$(dirname $INSTALL_DIR)/xinghe-light-main" "$INSTALL_DIR" 2>/dev/null || mv "$(dirname $INSTALL_DIR)/xinghe-light" "$INSTALL_DIR" 2>/dev/null
+
+if [ ! -d "$INSTALL_DIR" ]; then
+    error "解压失败"
+    exit 1
 fi
 
 cd "$INSTALL_DIR"
