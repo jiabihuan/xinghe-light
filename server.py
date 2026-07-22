@@ -8,22 +8,12 @@ import string
 import time
 import uuid
 import mimetypes
+import zipfile
+import struct
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 import re
-
-try:
-    from pyaxmlparser import APK as PyAxmlAPK
-    HAS_PYAXML = True
-except ImportError:
-    HAS_PYAXML = False
-
-try:
-    from apkutils import APK as ApkUtilsAPK
-    HAS_APKUTILS = True
-except ImportError:
-    HAS_APKUTILS = False
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -167,152 +157,250 @@ def parse_apk_info(file_path):
         'icon_data': None
     }
 
-    # 方案1：pyaxmlparser（纯Python，最可靠）
-    if HAS_PYAXML:
-        try:
-            apk = PyAxmlAPK(str(file_path))
+    try:
+        with zipfile.ZipFile(file_path, 'r') as zf:
+            manifest_data = None
+            resources_data = None
+            file_list = []
+            icon_candidates = []
 
-            info['package_name'] = apk.get_package() or ''
-            info['version_name'] = apk.get_androidversion_name() or ''
-            try:
-                vc = apk.get_androidversion_code()
-                if vc:
-                    info['version_code'] = int(vc)
-            except:
-                pass
+            for info_item in zf.infolist():
+                name = info_item.filename
+                file_list.append(name)
 
-            try:
-                app_name = apk.get_app_name()
-                if app_name and isinstance(app_name, str) and len(app_name) > 0:
-                    info['app_name'] = app_name
-            except:
-                pass
+                if name == 'AndroidManifest.xml':
+                    manifest_data = zf.read(name)
+                elif name == 'resources.arsc':
+                    resources_data = zf.read(name)
+                elif (name.startswith('res/mipmap-') or name.startswith('res/drawable-')) and \
+                     name.endswith(('.png', '.webp', '.jpg', '.jpeg')):
+                    basename = Path(name).stem.lower()
+                    if 'foreground' not in basename and 'background' not in basename and \
+                       'monochrome' not in basename and '_round' not in basename and 'adaptive' not in basename:
+                        icon_candidates.append(name)
 
-            try:
-                icon_path = apk.get_app_icon()
-                if icon_path and isinstance(icon_path, str):
-                    if icon_path.endswith(('.png', '.webp', '.jpg', '.jpeg')):
-                        icon_data = apk.get_file(icon_path)
+            if manifest_data:
+                manifest_info = parse_android_manifest(manifest_data)
+                info['package_name'] = manifest_info.get('package', '')
+                info['version_name'] = manifest_info.get('versionName', '')
+                info['version_code'] = manifest_info.get('versionCode', 1)
+
+                app_label_ref = manifest_info.get('appLabelRef')
+                if app_label_ref and resources_data:
+                    app_name = parse_string_from_arsc(resources_data, app_label_ref)
+                    if app_name:
+                        info['app_name'] = app_name
+
+            if not info['icon_data'] and icon_candidates:
+                density_order = [
+                    'mipmap-xxxhdpi', 'mipmap-xxhdpi', 'mipmap-xhdpi',
+                    'mipmap-hdpi', 'mipmap-mdpi',
+                    'drawable-xxxhdpi', 'drawable-xxhdpi', 'drawable-xhdpi',
+                    'drawable-hdpi', 'drawable-mdpi',
+                    'mipmap', 'drawable',
+                ]
+
+                icon_keywords = ['ic_launcher', 'app_icon', 'launcher_icon', 'icon']
+
+                def get_density_level(name):
+                    for i, density in enumerate(density_order):
+                        if density in name:
+                            return i
+                    return len(density_order)
+
+                def has_icon_keyword(name):
+                    basename = Path(name).stem.lower()
+                    for kw in icon_keywords:
+                        if kw in basename:
+                            return True
+                    return False
+
+                icon_candidates.sort(key=lambda x: (get_density_level(x), not has_icon_keyword(x)))
+
+                for icon_path in icon_candidates[:5]:
+                    try:
+                        icon_data = zf.read(icon_path)
                         if icon_data and len(icon_data) > 0:
-                            basename = Path(icon_path).stem.lower()
-                            if 'foreground' not in basename and 'background' not in basename and 'monochrome' not in basename:
-                                info['icon_data'] = icon_data
-            except:
-                pass
-
-            if not info['icon_data']:
-                try:
-                    icon_data = apk.icon_data
-                    if icon_data and len(icon_data) > 0:
-                        info['icon_data'] = icon_data
-                except:
-                    pass
-
-            if not info['icon_data']:
-                try:
-                    files = apk.get_files()
-                    file_list = []
-                    for entry in files:
-                        entry_name = entry if isinstance(entry, str) else entry.get('name', '')
-                        if entry_name:
-                            file_list.append(entry_name)
-
-                    density_order = [
-                        'mipmap-xxxhdpi-v4/', 'mipmap-xxhdpi-v4/', 'mipmap-xhdpi-v4/',
-                        'mipmap-hdpi-v4/', 'mipmap-mdpi-v4/',
-                        'drawable-xxxhdpi-v4/', 'drawable-xxhdpi-v4/', 'drawable-xhdpi-v4/',
-                        'drawable-hdpi-v4/', 'drawable-mdpi-v4/',
-                        'mipmap-xxxhdpi/', 'mipmap-xxhdpi/', 'mipmap-xhdpi/',
-                        'mipmap-hdpi/', 'mipmap-mdpi/',
-                        'drawable-xxxhdpi/', 'drawable-xxhdpi/', 'drawable-xhdpi/',
-                        'drawable-hdpi/', 'drawable-mdpi/',
-                        'mipmap/', 'drawable/',
-                    ]
-
-                    icon_keywords = ['ic_launcher', 'app_icon', 'launcher_icon', 'icon']
-                    exclude_keywords = ['foreground', 'background', 'monochrome', '_round', 'adaptive']
-
-                    def is_valid_icon(fname):
-                        if not fname.endswith(('.png', '.webp', '.jpg', '.jpeg')):
-                            return False
-                        basename = Path(fname).stem.lower()
-                        for ek in exclude_keywords:
-                            if ek in basename:
-                                return False
-                        return True
-
-                    found = False
-                    for density in density_order:
-                        if found:
+                            info['icon_data'] = icon_data
                             break
-                        candidates = [f for f in file_list if density in f and is_valid_icon(f)]
-                        best = None
-                        for kw in icon_keywords:
-                            match = [f for f in candidates if kw in Path(f).stem.lower()]
-                            if match:
-                                match.sort(key=lambda x: len(Path(x).stem))
-                                best = match[0]
-                                break
-                        if not best and candidates:
-                            candidates.sort(key=lambda x: len(Path(x).stem))
-                            best = candidates[0]
-                        if best:
-                            try:
-                                data = apk.get_file(best)
-                                if data and len(data) > 0:
-                                    info['icon_data'] = data
-                                    found = True
-                            except:
-                                continue
-                except Exception as e:
-                    print(f"图标搜索错误: {e}")
+                    except:
+                        continue
 
-            return info
-        except Exception as e:
-            print(f"pyaxmlparser解析错误: {e}")
-
-    # 方案2：apkutils
-    if HAS_APKUTILS:
-        apk = None
-        try:
-            apk = ApkUtilsAPK.from_file(file_path)
-            apk.parse_resource()
-
-            info['package_name'] = apk.get_package_name() or ''
-            info['version_name'] = apk.version_name or ''
-            if hasattr(apk, '_version_code') and apk._version_code:
-                try:
-                    info['version_code'] = int(apk._version_code)
-                except:
-                    pass
-
-            if hasattr(apk, '_app_name') and apk._app_name:
-                app_name = str(apk._app_name)
-                if not app_name.startswith('@') and not app_name.startswith('0x'):
-                    info['app_name'] = app_name
-
-            try:
-                icons = apk.get_app_icons()
-                if icons:
-                    if isinstance(icons, list):
-                        for icon_data in reversed(icons):
-                            if icon_data and isinstance(icon_data, bytes) and len(icon_data) > 0:
-                                info['icon_data'] = icon_data
-                                break
-                    elif isinstance(icons, bytes):
-                        info['icon_data'] = icons
-            except:
-                pass
-        except Exception as e:
-            print(f"apkutils解析错误: {e}")
-        finally:
-            if apk:
-                try:
-                    apk.close()
-                except:
-                    pass
+    except Exception as e:
+        print(f"APK解析错误: {e}")
 
     return info
+
+
+def parse_android_manifest(data):
+    result = {}
+    try:
+        idx = 0
+        app_label_ref = None
+
+        while idx < len(data):
+            if idx + 4 > len(data):
+                break
+
+            chunk_type, chunk_size = struct.unpack_from('<HH', data, idx)
+            idx += 4
+
+            if chunk_type == 0x0002:
+                while idx + 8 <= len(data):
+                    if idx + 2 > len(data):
+                        break
+                    res_id = struct.unpack_from('<H', data, idx)[0]
+                    idx += 2
+
+                    if idx + 2 > len(data):
+                        break
+                    val_type = struct.unpack_from('<H', data, idx)[0]
+                    idx += 2
+
+                    if val_type == 0x03:
+                        if idx + 4 <= len(data):
+                            str_offset = struct.unpack_from('<I', data, idx)[0]
+                            idx += 4
+                            if str_offset > 0:
+                                str_data = data[str_offset:]
+                                str_end = str_data.find(b'\x00')
+                                if str_end > 0:
+                                    try:
+                                        result['package'] = str_data[:str_end].decode('utf-8')
+                                    except:
+                                        pass
+                    elif val_type == 0x08:
+                        if idx + 4 <= len(data):
+                            ref_val = struct.unpack_from('<I', data, idx)[0]
+                            idx += 4
+                            if (ref_val >> 24) == 0x01:
+                                app_label_ref = ref_val
+                    elif val_type == 0x10:
+                        if idx + 4 <= len(data):
+                            vc = struct.unpack_from('<I', data, idx)[0]
+                            idx += 4
+                            result['versionCode'] = int(vc)
+                    elif val_type == 0x11:
+                        if idx + 4 <= len(data):
+                            vn_offset = struct.unpack_from('<I', data, idx)[0]
+                            idx += 4
+                            if vn_offset > 0:
+                                str_data = data[vn_offset:]
+                                str_end = str_data.find(b'\x00')
+                                if str_end > 0:
+                                    try:
+                                        result['versionName'] = str_data[:str_end].decode('utf-8')
+                                    except:
+                                        pass
+                    else:
+                        idx += chunk_size - 4
+            else:
+                idx += chunk_size - 4
+
+        if app_label_ref:
+            result['appLabelRef'] = app_label_ref
+
+    except Exception:
+        pass
+
+    return result
+
+
+def parse_string_from_arsc(data, resource_id):
+    try:
+        if len(data) < 8:
+            return None
+
+        magic, = struct.unpack_from('<I', data, 0)
+        if magic != 0x00000200:
+            return None
+
+        package_count, = struct.unpack_from('<I', data, 8)
+        offset = 12
+
+        for _ in range(package_count):
+            if offset + 28 > len(data):
+                break
+
+            type_count, string_pool_offset, resource_id_offset = struct.unpack_from('<III', data, offset + 8)
+
+            str_pool_start = string_pool_offset
+            if str_pool_start + 4 > len(data):
+                offset += 28 + type_count * 8
+                continue
+
+            string_count, = struct.unpack_from('<I', data, str_pool_start)
+            style_count, = struct.unpack_from('<I', data, str_pool_start + 4)
+
+            flags, = struct.unpack_from('<I', data, str_pool_start + 8)
+            is_utf8 = (flags & 0x00000100) != 0
+
+            strings_start = str_pool_start + 16 + style_count * 4
+
+            offsets = []
+            for i in range(string_count):
+                if is_utf8:
+                    if strings_start + 2 > len(data):
+                        break
+                    off, = struct.unpack_from('<H', data, strings_start)
+                    strings_start += 2
+                else:
+                    if strings_start + 4 > len(data):
+                        break
+                    off, = struct.unpack_from('<I', data, strings_start)
+                    strings_start += 4
+                offsets.append(off)
+
+            string_data_start = strings_start
+
+            target_id = resource_id & 0x00FFFFFF
+            if target_id >= len(offsets):
+                offset += 28 + type_count * 8
+                continue
+
+            str_offset = offsets[target_id]
+            str_data = data[string_data_start + str_offset:]
+
+            if is_utf8:
+                str_len = str_data[0]
+                if str_len & 0x80:
+                    str_len = ((str_len & 0x7F) << 8) | str_data[1]
+                    str_data = str_data[2:]
+                else:
+                    str_data = str_data[1:]
+
+                end_idx = 0
+                char_count = 0
+                while char_count < str_len and end_idx < len(str_data):
+                    b = str_data[end_idx]
+                    if b < 0x80:
+                        end_idx += 1
+                        char_count += 1
+                    elif b < 0xE0:
+                        end_idx += 2
+                        char_count += 1
+                    else:
+                        end_idx += 3
+                        char_count += 1
+
+                try:
+                    return str_data[:end_idx].decode('utf-8')
+                except:
+                    return None
+            else:
+                str_len = struct.unpack_from('<H', data, string_data_start + str_offset)[0]
+                str_data = data[string_data_start + str_offset + 2:string_data_start + str_offset + 2 + str_len * 2]
+                try:
+                    return str_data.decode('utf-16-le')
+                except:
+                    return None
+
+            offset += 28 + type_count * 8
+
+    except Exception:
+        pass
+
+    return None
 
 
 def save_icon(app_id, icon_data):

@@ -66,13 +66,6 @@ fi
 info "清理旧配置（重新生成持久化SECRET_KEY）..."
 rm -f data/config.json
 
-info "安装/更新APK解析依赖..."
-$PYTHON -m pip install pyaxmlparser -q
-if [ $? -ne 0 ]; then
-    warn "pyaxmlparser安装失败，尝试apkutils..."
-    $PYTHON -m pip install apkutils -q
-fi
-
 info "创建数据目录..."
 mkdir -p data uploads/apks
 
