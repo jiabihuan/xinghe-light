@@ -9,6 +9,7 @@ INSTALL_DIR="/www/wwwroot/xinghe-light"
 PORT=8000
 REPO_URL="https://github.com/jiabihuan/xinghe-light.git"
 REPO_MIRROR="https://gitee.com/jiabihuan/xinghe-light.git"
+GH_PROXY_URL="https://gh-proxy.org/https://github.com/jiabihuan/xinghe-light.git"
 PROXY=""
 
 info() { echo -e "\033[32m[信息]\033[0m $1"; }
@@ -70,11 +71,15 @@ fi
 
 git clone "$REPO_URL" "$INSTALL_DIR" 2>&1
 if [ $? -ne 0 ]; then
-    warn "GitHub克隆失败，尝试使用Gitee镜像..."
-    git clone "$REPO_MIRROR" "$INSTALL_DIR" 2>&1
+    warn "GitHub克隆失败，尝试使用gh-proxy镜像..."
+    git clone "$GH_PROXY_URL" "$INSTALL_DIR" 2>&1
     if [ $? -ne 0 ]; then
-        error "克隆失败，请检查网络或设置代理"
-        exit 1
+        warn "gh-proxy失败，尝试使用Gitee镜像..."
+        git clone "$REPO_MIRROR" "$INSTALL_DIR" 2>&1
+        if [ $? -ne 0 ]; then
+            error "克隆失败，请检查网络或设置代理"
+            exit 1
+        fi
     fi
 fi
 

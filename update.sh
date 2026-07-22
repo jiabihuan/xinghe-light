@@ -9,6 +9,7 @@ INSTALL_DIR="/www/wwwroot/xinghe-light"
 PORT=8000
 REPO_URL="https://github.com/jiabihuan/xinghe-light.git"
 REPO_MIRROR="https://gitee.com/jiabihuan/xinghe-light.git"
+GH_PROXY_URL="https://gh-proxy.org/https://github.com/jiabihuan/xinghe-light.git"
 PROXY=""
 
 info() { echo -e "\033[32m[信息]\033[0m $1"; }
@@ -70,13 +71,19 @@ fi
 git fetch origin 2>&1
 git reset --hard origin/main 2>&1
 if [ $? -ne 0 ]; then
-    warn "GitHub拉取失败，尝试使用Gitee镜像..."
-    git remote add mirror "$REPO_MIRROR" 2>/dev/null || true
-    git fetch mirror 2>&1
-    git reset --hard mirror/main 2>&1
+    warn "GitHub拉取失败，尝试使用gh-proxy镜像..."
+    git remote add ghproxy "$GH_PROXY_URL" 2>/dev/null || git remote set-url ghproxy "$GH_PROXY_URL"
+    git fetch ghproxy 2>&1
+    git reset --hard ghproxy/main 2>&1
     if [ $? -ne 0 ]; then
-        error "拉取失败，请检查网络或设置代理"
-        exit 1
+        warn "gh-proxy失败，尝试使用Gitee镜像..."
+        git remote add mirror "$REPO_MIRROR" 2>/dev/null || true
+        git fetch mirror 2>&1
+        git reset --hard mirror/main 2>&1
+        if [ $? -ne 0 ]; then
+            error "拉取失败，请检查网络或设置代理"
+            exit 1
+        fi
     fi
 fi
 
