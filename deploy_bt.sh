@@ -66,7 +66,15 @@ fi
 
 cd "$INSTALL_DIR"
 
-info "零依赖！无需安装任何包"
+info "安装APK解析依赖..."
+$PYTHON -m pip install pyaxmlparser -q
+if [ $? -ne 0 ]; then
+    warn "pyaxmlparser安装失败，尝试apkutils..."
+    $PYTHON -m pip install apkutils -q
+    if [ $? -ne 0 ]; then
+        warn "apkutils也安装失败，图标和应用名识别可能无法正常工作"
+    fi
+fi
 
 info "创建数据目录..."
 mkdir -p data uploads/apks
